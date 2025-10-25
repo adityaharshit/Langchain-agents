@@ -1,0 +1,45 @@
+# Deep Research Assistant Dependencies
+# Note: Using latest versions without pinning for security updates and improvements
+# Requires Python 3.11+
+
+# Core Framework
+fastapi
+uvicorn
+langgraph
+
+# Database and Vector Operations
+sqlalchemy[asyncio]
+asyncpg
+pgvector
+psycopg2-binary
+
+# AI and Embeddings
+openai
+tiktoken
+
+# Web Scraping and HTTP
+aiohttp
+playwright
+beautifulsoup4
+readability-lxml
+# urllib-robotparser
+
+# Text Processing and Language Detection
+langdetect
+sentence-transformers
+
+# Data Processing
+pydantic
+numpy
+pandas
+
+# Utilities
+python-dotenv
+structlog
+asyncio-throttle
+aiofiles
+
+# Testing (for development)
+pytest
+pytest-asyncio
+httpx
