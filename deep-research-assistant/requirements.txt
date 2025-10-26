@@ -6,7 +6,7 @@
 fastapi
 uvicorn
 langgraph
-
+mcp
 # Database and Vector Operations
 sqlalchemy[asyncio]
 asyncpg
