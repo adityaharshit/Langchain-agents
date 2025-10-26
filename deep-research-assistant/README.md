@@ -5,6 +5,7 @@ A sophisticated multi-agent orchestration system built with LangGraph that combi
 ## 🌟 Features
 
 - **Multi-Agent Architecture**: 5 specialized agents working in coordination
+- **🧠 LLM-Powered URL Generation**: GPT-4 intelligently suggests relevant sources for scraping
 - **Intelligent RAG**: PostgreSQL + pgvector for semantic search
 - **Adaptive Web Scraping**: Ethical scraping with robots.txt compliance
 - **Real-time Streaming**: Server-Sent Events for progress tracking
@@ -20,10 +21,20 @@ A sophisticated multi-agent orchestration system built with LangGraph that combi
 The system uses **LangGraph** to orchestrate five specialized agents:
 
 1. **Research Coordinator** - Query decomposition and orchestration
-2. **Web Scraper Agent** - Document retrieval and content processing  
+2. **Web Scraper Agent** - **LLM-powered URL generation** and document retrieval  
 3. **Deep Analysis Agent** - Comparative, trend, and causal analysis
 4. **Fact-Checking Agent** - Source validation and contradiction detection
 5. **Output Formatting Agent** - Citation formatting and report generation
+
+### 🧠 Intelligent URL Generation
+
+The Web Scraper Agent now uses **GPT-4** to intelligently generate relevant URLs for web scraping instead of hardcoded patterns:
+
+- **LLM-Powered**: Uses OpenAI GPT-4 to analyze research queries and suggest authoritative sources
+- **Contextual**: Considers the main query and all subqueries for comprehensive URL generation
+- **Authoritative Sources**: Prioritizes academic institutions, government agencies, and reputable organizations
+- **Fallback System**: Automatically falls back to pattern-based URL generation if LLM fails
+- **Diverse Content**: Generates URLs for academic papers, reports, news articles, and official statistics
 
 ### Agent Workflow
 
@@ -261,6 +272,16 @@ Uses PostgreSQL with pgvector for efficient similarity search:
 - **Index Type**: HNSW for approximate nearest neighbor search
 - **Similarity Metric**: Cosine similarity
 - **Search Methods**: Semantic, keyword, hybrid
+
+### Intelligent URL Generation
+
+The system uses GPT-4 to intelligently generate relevant URLs for web scraping:
+
+- **LLM Analysis**: GPT-4 analyzes the research query and subqueries
+- **Authoritative Sources**: Prioritizes academic, government, and reputable sources
+- **Content Diversity**: Suggests academic papers, reports, news articles, statistics
+- **Contextual Relevance**: Considers query context and research domain
+- **Fallback System**: Pattern-based generation if LLM is unavailable
 
 ### Web Scraping
 

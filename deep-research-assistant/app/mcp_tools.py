@@ -23,99 +23,131 @@ progress_queue: asyncio.Queue = asyncio.Queue()
 
 @mcp_tool(
     name="query_decomposer",
-    description="Decomposes complex queries into prioritized subqueries for systematic research",
+    description="Uses GPT-4o to intelligently decompose complex queries into prioritized subqueries",
     allowed_agents=["ResearchCoordinatorAgent"]
 )
 async def query_decomposer_tool(tool_input: dict, context: dict) -> dict:
     """
-    Decomposes complex queries into subqueries and returns prioritized list.
+    Uses OpenAI GPT-4o to decompose complex queries into subqueries and returns prioritized list.
     
     Args:
         tool_input: {"query": str, "max_subqueries": int}
         context: Additional context information
     """
     try:
+        import openai
+        from app.config import config
+        
         query = tool_input.get("query", "")
         max_subqueries = tool_input.get("max_subqueries", 5)
         
         if not query:
             return {"status": "error", "error": "Query is required", "meta": {}}
         
-        # Simple query decomposition logic (can be enhanced with LLM)
-        subqueries = []
+        # Initialize OpenAI client
+        client = openai.AsyncOpenAI(api_key=config.OPENAI_API_KEY)
         
-        # Look for key topics and relationships
-        # This is a simplified implementation - in production, use LLM for better decomposition
-        
-        # Extract key entities and concepts
-        key_patterns = [
-            r"COVID-19|coronavirus|pandemic",
-            r"renewable energy|solar|wind|clean energy",
-            r"investment|funding|finance|economic",
-            r"developing countries|emerging markets",
-            r"regulatory|policy|government|legislation",
-            r"regional|geographic|country|nation"
-        ]
-        
-        found_concepts = []
-        for pattern in key_patterns:
-            if re.search(pattern, query, re.IGNORECASE):
-                found_concepts.append(pattern.split("|")[0])  # Take first term as representative
-        
-        # Generate subqueries based on found concepts
-        if "COVID-19" in str(found_concepts):
-            subqueries.append({
-                "subquery": "COVID-19 economic impacts on developing countries",
+        # Create prompt for intelligent query decomposition
+        prompt = f"""
+            You are an expert research analyst tasked with breaking down complex research questions into manageable sub-questions for systematic investigation.
+
+            Main Research Query: {query}
+
+            Your task is to decompose this query into {max_subqueries} focused sub-questions that will enable comprehensive research. Each sub-question should:
+
+            1. Address a specific aspect of the main query
+            2. Be researchable through academic sources, reports, and reliable data
+            3. Build towards answering the main question
+            4. Be prioritized by importance and logical sequence
+
+            For each sub-question, provide:
+            - The specific sub-question
+            - Priority level (1 = highest priority, {max_subqueries} = lowest)
+            - Rationale for why this sub-question is important
+            - Expected information type (data, analysis, case studies, etc.)
+
+            Format your response as a JSON array:
+            [
+            {{
+                "subquery": "Specific focused research question",
                 "priority": 1,
-                "rationale": "Understanding the baseline economic impact is crucial"
-            })
-        
-        if "renewable energy" in str(found_concepts):
-            subqueries.append({
-                "subquery": "Renewable energy investment trends 2019-2023",
-                "priority": 2,
-                "rationale": "Historical context for investment patterns"
-            })
-        
-        if "regulatory" in str(found_concepts):
-            subqueries.append({
-                "subquery": "Regional regulatory frameworks for renewable energy",
-                "priority": 3,
-                "rationale": "Policy context affects investment decisions"
-            })
-        
-        # Add correlation analysis if multiple concepts found
-        if len(found_concepts) > 1:
-            subqueries.append({
-                "subquery": "Correlation between economic disruption and policy changes",
-                "priority": 4,
-                "rationale": "Understanding causal relationships"
-            })
+                "rationale": "Why this question is important for the overall research",
+                "expected_info_type": "data|analysis|case_studies|policy_review|literature_review",
+                "research_scope": "global|regional|national|sectoral"
+            }}
+            ]
+
+            Generate exactly {max_subqueries} sub-questions, ordered by priority.
+            """
+
+        try:
+            # Call OpenAI API
+            response = await client.chat.completions.create(
+                model=config.DECOMPOSITION_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are an expert research analyst specializing in breaking down complex research questions into systematic investigation plans."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=1500
+            )
             
-            subqueries.append({
-                "subquery": "Geographic variation in policy responses",
-                "priority": 5,
-                "rationale": "Regional differences in implementation"
-            })
-        
-        # Limit to max_subqueries
-        subqueries = subqueries[:max_subqueries]
-        
-        # Sort by priority
-        subqueries.sort(key=lambda x: x["priority"])
-        
-        return {
-            "status": "ok",
-            "result": {
-                "original_query": query,
-                "subqueries": subqueries,
-                "total_subqueries": len(subqueries)
-            },
-            "meta": {
-                "concepts_found": found_concepts,
-                "decomposition_method": "pattern_based"
+            # Parse the response
+            response_content = response.choices[0].message.content
+            
+            # Extract JSON from the response
+            import json
+            json_match = re.search(r'\[.*\]', response_content, re.DOTALL)
+            if json_match:
+                subqueries_data = json.loads(json_match.group())
+            else:
+                subqueries_data = json.loads(response_content)
+            
+            # Validate and process the subqueries
+            subqueries = []
+            for sq_data in subqueries_data:
+                if isinstance(sq_data, dict) and "subquery" in sq_data:
+                    subqueries.append({
+                        "subquery": sq_data["subquery"],
+                        "priority": sq_data.get("priority", len(subqueries) + 1),
+                        "rationale": sq_data.get("rationale", ""),
+                        "expected_info_type": sq_data.get("expected_info_type", "analysis"),
+                        "research_scope": sq_data.get("research_scope", "global")
+                    })
+            
+            # Sort by priority
+            subqueries.sort(key=lambda x: x["priority"])
+            
+            return {
+                "status": "ok",
+                "result": {
+                    "original_query": query,
+                    "subqueries": subqueries,
+                    "total_subqueries": len(subqueries)
+                },
+                "meta": {
+                    "decomposition_method": "openai_gpt4o",
+                    "model_used": config.DECOMPOSITION_MODEL,
+                    "prompt_tokens": response.usage.prompt_tokens if hasattr(response, 'usage') else 0,
+                    "completion_tokens": response.usage.completion_tokens if hasattr(response, 'usage') else 0
+                }
             }
-        }
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse LLM response as JSON: {e}")
+            return {
+                "status": "error",
+                "error": f"Failed to parse decomposition response: {str(e)}",
+                "meta": {}
+            }
+            
+        except Exception as e:
+            logger.error(f"OpenAI API call failed: {e}")
+            return {
+                "status": "error",
+                "error": f"Query decomposition failed: {str(e)}",
+                "meta": {}
+            }
         
     except Exception as e:
         logger.error(f"Query decomposition failed: {e}")
@@ -128,80 +160,179 @@ async def query_decomposer_tool(tool_input: dict, context: dict) -> dict:
 
 @mcp_tool(
     name="task_prioritizer",
-    description="Ranks tasks by estimated cost and importance for optimal execution order",
+    description="Uses GPT-4o to intelligently rank tasks by importance, complexity, and research value",
     allowed_agents=["ResearchCoordinatorAgent"]
 )
 async def task_prioritizer_tool(tool_input: dict, context: dict) -> dict:
     """
-    Ranks tasks by estimated cost/importance.
-    
-    Args:
-        tool_input: {"tasks": List[dict], "criteria": dict}
-        context: Additional context information
+    Uses OpenAI GPT-4o to intelligently rank tasks by estimated cost/importance.
     """
     try:
+        import openai
+        import json
+        import re
+        from app.config import config
+        import logging
+
+        logger = logging.getLogger(__name__)
+
         tasks = tool_input.get("tasks", [])
         criteria = tool_input.get("criteria", {})
-        
-        if not tasks:
+        main_query = tool_input.get("main_query", "")
+
+        # 🧩 Handle your input structure automatically
+        # If "tasks" is actually the entire 'inp' dict from your decomposer output
+        if isinstance(tasks, dict):
+            # Extract from the decomposer result structure
+            if "result" in tasks and "subqueries" in tasks["result"]:
+                main_query = main_query or tasks["result"].get("original_query", "")
+                tasks = tasks["result"]["subqueries"]
+            else:
+                # fallback: no subqueries found
+                tasks = []
+
+        if not isinstance(tasks, list) or not tasks:
             return {"status": "error", "error": "Tasks list is required", "meta": {}}
-        
-        # Default scoring criteria
-        default_criteria = {
-            "importance_weight": 0.6,
-            "cost_weight": 0.4,
-            "urgency_weight": 0.3
-        }
-        criteria = {**default_criteria, **criteria}
-        
-        prioritized_tasks = []
-        
+
+        # Initialize OpenAI client
+        client = openai.AsyncOpenAI(api_key=config.OPENAI_API_KEY)
+
+        # Prepare tasks for analysis
+        tasks_text = ""
         for i, task in enumerate(tasks):
-            # Calculate priority score based on multiple factors
-            importance = task.get("importance", 5)  # 1-10 scale
-            estimated_cost = task.get("estimated_cost", 5)  # 1-10 scale (lower is better)
-            urgency = task.get("urgency", 5)  # 1-10 scale
-            
-            # Calculate composite score (higher is better)
-            priority_score = (
-                importance * criteria["importance_weight"] +
-                (11 - estimated_cost) * criteria["cost_weight"] +  # Invert cost (lower cost = higher score)
-                urgency * criteria["urgency_weight"]
+            task_desc = task.get("subquery", task.get("description", f"Task {i+1}"))
+            tasks_text += f"{i+1}. {task_desc}\n"
+
+        # Create prompt for intelligent task prioritization
+        prompt = f"""
+            You are an expert research strategist tasked with prioritizing research tasks for maximum efficiency and impact.
+
+            Main Research Objective: {main_query}
+
+            Research Tasks to Prioritize:
+            {tasks_text}
+
+            Your task is to analyze and prioritize these research tasks based on:
+
+            1. **Strategic Importance**: How critical is this task for answering the main research question?
+            2. **Information Value**: How much unique, valuable information will this task likely provide?
+            3. **Research Efficiency**: How accessible and reliable are sources for this task?
+            4. **Logical Sequence**: Should this task be completed before others to inform subsequent research?
+            5. **Scope and Complexity**: How comprehensive and time-intensive is this task?
+
+            For each task, provide:
+            - Priority rank (1 = highest priority)
+            - Importance score (1-10, where 10 = critical)
+            - Complexity score (1-10, where 10 = most complex)
+            - Expected research value (1-10, where 10 = highest value)
+            - Rationale for the prioritization
+            - Estimated research effort (low/medium/high)
+
+            Format your response as a JSON array ordered by priority:
+            [
+            {{
+                "task_id": 1,
+                "priority_rank": 1,
+                "importance_score": 9,
+                "complexity_score": 6,
+                "research_value": 9,
+                "rationale": "Why this task should be prioritized",
+                "estimated_effort": "medium",
+                "dependencies": ["List of other tasks this depends on"],
+                "expected_sources": ["Types of sources likely to be found"]
+            }}
+            ]
+
+            Prioritize all {len(tasks)} tasks.
+            """
+
+        try:
+            # Call OpenAI API
+            response = await client.chat.completions.create(
+                model=config.REASONING_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are an expert research strategist specializing in optimizing research workflows and task prioritization for maximum efficiency and impact."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.2,
+                max_tokens=2000
             )
-            
-            prioritized_tasks.append({
-                "task_id": task.get("id", i),
-                "task": task,
-                "priority_score": round(priority_score, 2),
-                "rank": 0  # Will be set after sorting
-            })
-        
-        # Sort by priority score (descending)
-        prioritized_tasks.sort(key=lambda x: x["priority_score"], reverse=True)
-        
-        # Assign ranks
-        for i, task in enumerate(prioritized_tasks):
-            task["rank"] = i + 1
-        
-        return {
-            "status": "ok",
-            "result": {
-                "prioritized_tasks": prioritized_tasks,
-                "total_tasks": len(prioritized_tasks),
-                "criteria_used": criteria
-            },
-            "meta": {
-                "prioritization_method": "weighted_scoring"
+
+            response_content = response.choices[0].message.content
+
+            # Extract JSON from the response
+            json_match = re.search(r'\[.*\]', response_content, re.DOTALL)
+            if json_match:
+                prioritized_data = json.loads(json_match.group())
+            else:
+                prioritized_data = json.loads(response_content)
+
+            # Process and validate the prioritized tasks
+            prioritized_tasks = []
+            for i, task_data in enumerate(prioritized_data):
+                if isinstance(task_data, dict):
+                    original_task = (
+                        tasks[task_data.get("task_id", i + 1) - 1]
+                        if task_data.get("task_id", i + 1) <= len(tasks)
+                        else tasks[i]
+                    )
+
+                    prioritized_tasks.append({
+                        "task_id": task_data.get("task_id", i + 1),
+                        "task": original_task,
+                        "priority_rank": task_data.get("priority_rank", i + 1),
+                        "importance_score": task_data.get("importance_score", 5),
+                        "complexity_score": task_data.get("complexity_score", 5),
+                        "research_value": task_data.get("research_value", 5),
+                        "rationale": task_data.get("rationale", ""),
+                        "estimated_effort": task_data.get("estimated_effort", "medium"),
+                        "dependencies": task_data.get("dependencies", []),
+                        "expected_sources": task_data.get("expected_sources", [])
+                    })
+
+            prioritized_tasks.sort(key=lambda x: x["priority_rank"])
+
+            return {
+                "status": "ok",
+                "result": {
+                    "prioritized_tasks": prioritized_tasks,
+                    "total_tasks": len(prioritized_tasks),
+                    "main_query": main_query
+                },
+                "meta": {
+                    "prioritization_method": "openai_gpt4o_strategic",
+                    "model_used": config.REASONING_MODEL,
+                    "prompt_tokens": getattr(response.usage, "prompt_tokens", 0),
+                    "completion_tokens": getattr(response.usage, "completion_tokens", 0)
+                }
             }
-        }
-        
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse LLM response as JSON: {e}")
+            return {
+                "status": "error",
+                "error": f"Failed to parse prioritization response: {str(e)}",
+                "meta": {}
+            }
+
+        except Exception as e:
+            logger.error(f"OpenAI API call failed: {e}")
+            return {
+                "status": "error",
+                "error": f"Task prioritization failed: {str(e)}",
+                "meta": {}
+            }
+
     except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
         logger.error(f"Task prioritization failed: {e}")
         return {
             "status": "error",
             "error": f"Task prioritization failed: {str(e)}",
             "meta": {}
         }
+
 
 
 @mcp_tool(
@@ -399,6 +530,257 @@ async def _simple_synthesis(results_by_agent: Dict[str, List[dict]]) -> dict:
 # ============================================================================
 
 @mcp_tool(
+    name="intelligent_url_generator",
+    description="Uses LLM to generate relevant URLs for web scraping based on research queries",
+    allowed_agents=["WebScraperRetrievalAgent"]
+)
+async def intelligent_url_generator_tool(tool_input: dict, context: dict) -> dict:
+    """
+    Generate intelligent URLs using LLM based on research queries and subqueries.
+    
+    Args:
+        tool_input: {"query": str, "subqueries": List[str], "max_urls": int, "domains": List[str]}
+        context: Additional context information
+    """
+    try:
+        import openai
+        from app.config import config
+        
+        query = tool_input.get("query", "")
+        subqueries = tool_input.get("subqueries", [])
+        max_urls = tool_input.get("max_urls", config.MAX_GENERATED_URLS)
+        preferred_domains = tool_input.get("domains", [])
+        
+        if not query:
+            return {"status": "error", "error": "Query is required", "meta": {}}
+        
+        # Initialize OpenAI client
+        client = openai.AsyncOpenAI(api_key=config.OPENAI_API_KEY)
+        
+        # Create a comprehensive prompt for URL generation
+        prompt = f"""
+You are an expert research assistant tasked with generating relevant URLs for web scraping to answer research questions.
+
+Main Research Query: {query}
+
+Sub-queries to address:
+{chr(10).join(f"- {sq}" for sq in subqueries)}
+
+Your task is to generate {max_urls} high-quality, relevant URLs that would likely contain information to answer these research questions.
+
+Guidelines:
+1. Focus on authoritative sources (academic institutions, government agencies, reputable news organizations, research institutes)
+2. Include a mix of source types: academic papers, reports, news articles, official statistics
+3. Prioritize recent content (2019-2024) when relevant
+4. Consider international and regional perspectives
+5. Include specific organizations likely to have relevant data
+
+Preferred domains (if applicable): {', '.join(preferred_domains) if preferred_domains else 'Any authoritative source'}
+
+For each URL, provide:
+- The complete URL
+- A brief description of why this source would be valuable
+- The expected content type (academic paper, report, news article, etc.)
+
+Format your response as a JSON array with this structure:
+[
+  {{
+    "url": "https://example.com/relevant-article",
+    "description": "Why this URL is relevant to the research",
+    "content_type": "academic paper|report|news article|government data|research institute",
+    "relevance_score": 0.95,
+    "expected_topics": ["topic1", "topic2"]
+  }}
+]
+
+Generate exactly {max_urls} URLs, ranked by relevance and authority.
+"""
+
+        try:
+            # Call OpenAI API
+            response = await client.chat.completions.create(
+                model=config.URL_GENERATION_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are an expert research assistant specializing in finding authoritative sources for academic and policy research."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=config.URL_GENERATION_TEMPERATURE,
+                max_tokens=2000
+            )
+            
+            # Parse the response
+            response_content = response.choices[0].message.content
+            
+            # Extract JSON from the response
+            import json
+            import re
+            
+            # Try to find JSON in the response
+            json_match = re.search(r'\[.*\]', response_content, re.DOTALL)
+            if json_match:
+                urls_data = json.loads(json_match.group())
+            else:
+                # Fallback: try to parse the entire response as JSON
+                urls_data = json.loads(response_content)
+            
+            # Validate and process the URLs
+            generated_urls = []
+            for url_info in urls_data:
+                if isinstance(url_info, dict) and "url" in url_info:
+                    # Validate URL format
+                    url = url_info["url"]
+                    if url.startswith(("http://", "https://")):
+                        generated_urls.append({
+                            "url": url,
+                            "description": url_info.get("description", ""),
+                            "content_type": url_info.get("content_type", "unknown"),
+                            "relevance_score": url_info.get("relevance_score", 0.5),
+                            "expected_topics": url_info.get("expected_topics", []),
+                            "generation_method": "llm_generated"
+                        })
+            
+            # If we don't have enough URLs, add some fallback authoritative sources
+            if len(generated_urls) < max_urls // 2:
+                fallback_urls = await _generate_fallback_urls(query, subqueries, max_urls - len(generated_urls))
+                generated_urls.extend(fallback_urls)
+            
+            return {
+                "status": "ok",
+                "result": {
+                    "generated_urls": generated_urls[:max_urls],
+                    "total_generated": len(generated_urls),
+                    "query": query,
+                    "subqueries": subqueries
+                },
+                "meta": {
+                    "generation_method": "openai_gpt4",
+                    "model_used": "gpt-4",
+                    "prompt_tokens": response.usage.prompt_tokens if hasattr(response, 'usage') else 0,
+                    "completion_tokens": response.usage.completion_tokens if hasattr(response, 'usage') else 0
+                }
+            }
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse LLM response as JSON: {e}")
+            # Fallback to pattern-based URL generation
+            fallback_urls = await _generate_fallback_urls(query, subqueries, max_urls)
+            return {
+                "status": "ok",
+                "result": {
+                    "generated_urls": fallback_urls,
+                    "total_generated": len(fallback_urls),
+                    "query": query,
+                    "subqueries": subqueries
+                },
+                "meta": {
+                    "generation_method": "fallback_pattern_based",
+                    "error": "LLM response parsing failed"
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"OpenAI API call failed: {e}")
+            # Fallback to pattern-based URL generation
+            fallback_urls = await _generate_fallback_urls(query, subqueries, max_urls)
+            return {
+                "status": "ok",
+                "result": {
+                    "generated_urls": fallback_urls,
+                    "total_generated": len(fallback_urls),
+                    "query": query,
+                    "subqueries": subqueries
+                },
+                "meta": {
+                    "generation_method": "fallback_pattern_based",
+                    "error": f"OpenAI API error: {str(e)}"
+                }
+            }
+        
+    except Exception as e:
+        logger.error(f"Intelligent URL generation failed: {e}")
+        return {
+            "status": "error",
+            "error": f"URL generation failed: {str(e)}",
+            "meta": {}
+        }
+
+
+async def _generate_fallback_urls(query: str, subqueries: List[str], max_urls: int) -> List[dict]:
+    """
+    Generate fallback URLs using pattern-based approach when LLM fails.
+    """
+    fallback_urls = []
+    
+    # Extract key terms from query and subqueries
+    all_queries = [query] + subqueries
+    key_terms = set()
+    
+    for q in all_queries:
+        # Simple keyword extraction
+        words = re.findall(r'\b\w+\b', q.lower())
+        # Filter out common words
+        stop_words = {'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'this', 'that', 'these', 'those', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'must'}
+        key_terms.update([word for word in words if len(word) > 3 and word not in stop_words])
+    
+    # Convert to list and limit
+    key_terms = list(key_terms)[:10]
+    
+    # Authoritative domain patterns
+    authoritative_domains = [
+        # Academic and Research
+        ("scholar.google.com", "academic"),
+        ("researchgate.net", "academic"),
+        ("arxiv.org", "academic"),
+        ("jstor.org", "academic"),
+        ("pubmed.ncbi.nlm.nih.gov", "academic"),
+        
+        # Government and International Organizations
+        ("worldbank.org", "report"),
+        ("imf.org", "report"),
+        ("un.org", "report"),
+        ("oecd.org", "report"),
+        ("who.int", "report"),
+        ("iea.org", "report"),
+        
+        # News and Analysis
+        ("reuters.com", "news article"),
+        ("bbc.com", "news article"),
+        ("economist.com", "news article"),
+        ("ft.com", "news article"),
+        
+        # Think Tanks and Research Institutes
+        ("brookings.edu", "report"),
+        ("cfr.org", "report"),
+        ("rand.org", "report"),
+    ]
+    
+    # Generate URLs for each domain
+    for domain, content_type in authoritative_domains[:max_urls]:
+        if key_terms:
+            search_term = "+".join(key_terms[:3])  # Use top 3 key terms
+            
+            if "google.com" in domain:
+                url = f"https://{domain}/scholar?q={search_term}"
+            elif domain in ["worldbank.org", "imf.org", "oecd.org"]:
+                url = f"https://www.{domain}/en/research?q={search_term}"
+            elif domain in ["reuters.com", "bbc.com"]:
+                url = f"https://www.{domain}/search?q={search_term}"
+            else:
+                url = f"https://www.{domain}/search?q={search_term}"
+            
+            fallback_urls.append({
+                "url": url,
+                "description": f"Search results from {domain} for key terms: {', '.join(key_terms[:3])}",
+                "content_type": content_type,
+                "relevance_score": 0.6,
+                "expected_topics": key_terms[:5],
+                "generation_method": "pattern_based_fallback"
+            })
+    
+    return fallback_urls[:max_urls]
+
+
+@mcp_tool(
     name="keyword_search",
     description="Uses Postgres full-text search to find candidate pages or seed URLs",
     allowed_agents=["WebScraperRetrievalAgent"]
@@ -476,60 +858,210 @@ async def keyword_search_tool(tool_input: dict, context: dict) -> dict:
         }
 
 
+async def _load_url_with_timeout(
+    url: str,
+    timeout: int,
+    retry_count: int = 0,
+    max_retries: int = 2
+) -> Optional[dict]:
+    """
+    Load a single URL with timeout and retry logic.
+    
+    Args:
+        url: URL to scrape
+        timeout: Timeout in seconds
+        retry_count: Current retry attempt
+        max_retries: Maximum retry attempts
+        
+    Returns:
+        Document dict or None if failed
+    """
+    from langchain_community.document_loaders import WebBaseLoader
+    from app.config import config
+    import asyncio
+    import time
+    
+    start_time = time.time()
+    
+    try:
+        logger.info(f"Attempting to scrape: {url} (attempt {retry_count + 1}/{max_retries + 1})")
+        
+        # Create loader for single URL
+        loader = WebBaseLoader([url])
+        
+        # Load with timeout
+        documents = await asyncio.wait_for(
+            asyncio.to_thread(loader.load),
+            timeout=timeout
+        )
+        
+        scraping_time = time.time() - start_time
+        
+        # Process the document
+        if documents and len(documents) > 0:
+            doc = documents[0]
+            url_result = doc.metadata.get('source', url)
+            title = doc.metadata.get('title', '')
+            content = doc.page_content
+            
+            if content:
+                logger.info(f"Successfully scraped: {url} ({len(content)} chars in {scraping_time:.2f}s)")
+                return {
+                    "url": url_result,
+                    "title": title,
+                    "cleaned_text": content,
+                    "raw_html": "",
+                    "language": "en",
+                    "publish_date": None,
+                    "source_trust_score": 0.7,
+                    "license": None,
+                    "author": "",
+                    "description": content[:200] + "..." if len(content) > 200 else content,
+                    "keywords": [],
+                    "extraction_method": "langchain_webbaseloader_with_timeout",
+                    "scraping_time": scraping_time
+                }
+            else:
+                logger.warning(f"No content extracted from: {url}")
+                return None
+        else:
+            logger.warning(f"No documents returned from: {url}")
+            return None
+            
+    except asyncio.TimeoutError:
+        logger.warning(f"URL {url} timed out after {timeout}s (attempt {retry_count + 1}/{max_retries + 1})")
+        
+        # Retry with exponential backoff
+        if retry_count < max_retries:
+            delay = config.BACKOFF_FACTOR ** retry_count
+            logger.warning(f"Retry {retry_count + 1} for {url} after {delay}s delay")
+            await asyncio.sleep(delay)
+            return await _load_url_with_timeout(url, timeout, retry_count + 1, max_retries)
+        else:
+            logger.error(f"Failed to scrape {url} after {max_retries + 1} attempts: Timeout")
+            return None
+            
+    except Exception as e:
+        error_type = type(e).__name__
+        logger.warning(f"Error scraping {url} (attempt {retry_count + 1}/{max_retries + 1}): {error_type} - {str(e)}")
+        
+        # Retry for transient errors
+        if retry_count < max_retries and "ConnectionError" in error_type or "HTTPError" in error_type:
+            delay = config.BACKOFF_FACTOR ** retry_count
+            logger.warning(f"Retry {retry_count + 1} for {url} after {delay}s delay")
+            await asyncio.sleep(delay)
+            return await _load_url_with_timeout(url, timeout, retry_count + 1, max_retries)
+        else:
+            logger.error(f"Failed to scrape {url} after {retry_count + 1} attempts: {error_type} - {str(e)}")
+            return None
+
+
 @mcp_tool(
     name="web_scraper",
-    description="Fetches pages with aiohttp and Playwright fallback, extracts text and metadata",
+    description="Uses LangChain WebBaseLoader to fetch and process web pages efficiently",
     allowed_agents=["WebScraperRetrievalAgent"]
 )
 async def web_scraper_tool(tool_input: dict, context: dict) -> dict:
     """
-    Given a URL or search-term seed, fetches pages, extracts text, metadata.
+    Uses LangChain WebBaseLoader to fetch pages and extract content with timeout protection.
     
     Args:
-        tool_input: {"urls": List[str], "search_terms": List[str], "max_pages": int}
+        tool_input: {"urls": List[str], "max_pages": int}
         context: Additional context information
     """
     try:
-        from app.workers.scraper_worker import ScrapingWorker
+        from app.config import config
+        import asyncio
         
         urls = tool_input.get("urls", [])
-        search_terms = tool_input.get("search_terms", [])
         max_pages = tool_input.get("max_pages", 10)
         
-        if not urls and not search_terms:
-            return {"status": "error", "error": "URLs or search terms are required", "meta": {}}
-        
-        # Initialize scraping worker
-        scraper = ScrapingWorker()
-        
-        # If search terms provided, convert to URLs (simplified - would use search API in production)
-        if search_terms and not urls:
-            # For demo purposes, generate some example URLs
-            # In production, this would use a search API like Google Custom Search
-            example_urls = [
-                f"https://example.com/search?q={'+'.join(term.split())}"
-                for term in search_terms[:3]
-            ]
-            urls.extend(example_urls)
+        if not urls:
+            return {"status": "error", "error": "URLs are required", "meta": {}}
         
         # Limit URLs to max_pages
         urls = urls[:max_pages]
         
-        # Scrape URLs
-        scraped_documents = await scraper.scrape_urls(urls)
+        # Validate and set timeout configuration
+        timeout = config.REQUEST_TIMEOUT
+        if timeout < 5 or timeout > 120:
+            logger.warning(f"Invalid timeout {timeout}s, using default 30s")
+            timeout = 30
+        
+        # Validate and set retry configuration
+        max_retries = 2  # Hardcoded for web scraping
+        if max_retries < 0 or max_retries > 5:
+            logger.warning(f"Invalid max_retries {max_retries}, using default 2")
+            max_retries = 2
+        
+        scraped_documents = []
+        failed_urls = []
+        timeout_urls = []
+        total_attempts = 0
+        
+        # Process URLs individually with timeout protection
+        for url in urls:
+            try:
+                result = await _load_url_with_timeout(url, timeout, 0, max_retries)
+                total_attempts += 1
+                
+                if result:
+                    scraped_documents.append(result)
+                else:
+                    # Check if it was a timeout or other failure
+                    # (timeout wrapper logs this, we just track it)
+                    failed_urls.append({
+                        "url": url,
+                        "error_type": "unknown",
+                        "error_message": "Failed to load content",
+                        "attempts": max_retries + 1
+                    })
+                
+                # Rate limiting between URLs
+                await asyncio.sleep(config.SCRAPE_RATE_LIMIT)
+                
+            except asyncio.TimeoutError:
+                timeout_urls.append(url)
+                total_attempts += 1
+            except Exception as e:
+                failed_urls.append({
+                    "url": url,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                    "attempts": 1
+                })
+                total_attempts += 1
+        
+        # Calculate success rate
+        success_rate = len(scraped_documents) / len(urls) if urls else 0.0
+        
+        # Log summary statistics
+        logger.info(f"Scraping complete: {len(scraped_documents)}/{len(urls)} successful, "
+                   f"{len(failed_urls)} failed, {len(timeout_urls)} timed out "
+                   f"(success rate: {success_rate:.1%})")
+        
+        # Determine status based on results
+        if len(scraped_documents) == 0:
+            status = "error"
+        else:
+            status = "ok"
         
         return {
-            "status": "ok",
+            "status": status,
             "result": {
                 "scraped_documents": scraped_documents,
                 "total_scraped": len(scraped_documents),
-                "requested_urls": urls
+                "requested_urls": urls,
+                "failed_urls": failed_urls,
+                "timeout_urls": timeout_urls,
+                "success_rate": success_rate
             },
             "meta": {
-                "scraper_config": {
-                    "max_concurrent": scraper.max_concurrent,
-                    "rate_limit": scraper.rate_limit
-                }
+                "scraper_method": "langchain_webbaseloader_with_timeout",
+                "timeout_seconds": timeout,
+                "max_retries": max_retries,
+                "total_attempts": total_attempts,
+                "language_filter": "english_only"
             }
         }
         
@@ -543,155 +1075,212 @@ async def web_scraper_tool(tool_input: dict, context: dict) -> dict:
 
 
 @mcp_tool(
-    name="semantic_scraping",
-    description="Specialized extraction using schema.org and readability heuristics",
-    allowed_agents=["WebScraperRetrievalAgent"]
+    name="semantic_search",
+    description="Uses PGVector semantic search to find relevant content from stored documents",
+    allowed_agents=["WebScraperRetrievalAgent", "DeepAnalysisAgent"]
 )
-async def semantic_scraping_tool(tool_input: dict, context: dict) -> dict:
+async def semantic_search_tool(tool_input: dict, context: dict) -> dict:
     """
-    Specialized extraction using schema.org and readability heuristics.
+    Uses PGVector semantic search to find relevant content.
     
     Args:
-        tool_input: {"html_content": str, "url": str, "extract_schema": bool}
+        tool_input: {"query": str, "k": int, "collection_name": str, "similarity_threshold": float}
         context: Additional context information
     """
     try:
-        from app.utils.text_cleaner import extract_semantic_content
+        from langchain_postgres import PGVector
+        from langchain_openai import OpenAIEmbeddings
+        from app.config import config
+        import asyncio
         
-        html_content = tool_input.get("html_content", "")
-        url = tool_input.get("url", "")
-        extract_schema = tool_input.get("extract_schema", True)
+        query = tool_input.get("query", "")
+        k = tool_input.get("k", 8)
+        collection_name = config.COLLECTION_NAME
+        similarity_threshold = config.SIMILARITY_THRESHOLD
         
-        if not html_content:
-            return {"status": "error", "error": "HTML content is required", "meta": {}}
+        if not query:
+            return {"status": "error", "error": "Query is required", "meta": {}}
         
-        # Extract semantic content
-        extracted_content = await extract_semantic_content(
-            html_content, 
-            url, 
-            extract_schema=extract_schema
+        # Initialize OpenAI embeddings
+        embeddings = OpenAIEmbeddings(
+            model=config.EMBEDDING_MODEL,
+            openai_api_key=config.OPENAI_API_KEY
         )
+        
+        # Initialize PGVector
+        connection_string = config.DATABASE_URL.replace("+asyncpg", "")
+        vectorstore = PGVector(
+            connection=connection_string,
+            embeddings=embeddings,
+            collection_name=collection_name
+        )
+        
+        # Perform semantic search
+        results = await asyncio.to_thread(
+            vectorstore.similarity_search_with_score,
+            query,
+            k=k
+        )
+        
+        # Filter by similarity threshold and format results
+        relevant_results = []
+        for doc, score in results:
+            # Convert distance to similarity (PGVector returns distance, lower is better)
+            similarity = 1 - score if score <= 1 else 1 / (1 + score)
+            
+            if similarity >= similarity_threshold:
+                relevant_results.append({
+                    "content": doc.page_content,
+                    "metadata": doc.metadata,
+                    "similarity_score": similarity,
+                    "url": doc.metadata.get("url", ""),
+                    "title": doc.metadata.get("title", ""),
+                    "source_trust_score": doc.metadata.get("source_trust_score", 0.5)
+                })
+        
+        # Calculate confidence based on results
+        if relevant_results:
+            avg_similarity = sum(r["similarity_score"] for r in relevant_results) / len(relevant_results)
+            confidence = min(avg_similarity * 1.2, 1.0)  # Boost confidence slightly
+        else:
+            confidence = 0.0
         
         return {
             "status": "ok",
-            "result": extracted_content,
+            "result": {
+                "results": relevant_results,
+                "total_results": len(relevant_results),
+                "confidence_score": confidence,
+                "query": query,
+                "collection_name": collection_name
+            },
             "meta": {
-                "extraction_method": "semantic_readability",
-                "schema_extraction": extract_schema
+                "search_method": "pgvector_semantic",
+                "embedding_model": config.EMBEDDING_MODEL,
+                "similarity_threshold": similarity_threshold,
+                "requested_k": k,
+                "returned_k": len(relevant_results)
             }
         }
         
     except Exception as e:
-        logger.error(f"Semantic scraping failed: {e}")
+        logger.error(f"Semantic search failed: {e}")
         return {
             "status": "error",
-            "error": f"Semantic scraping failed: {str(e)}",
+            "error": f"Semantic search failed: {str(e)}",
             "meta": {}
         }
 
 
 @mcp_tool(
     name="rag_upsert",
-    description="Chunks, embeds, and upserts content to pgvector for RAG retrieval",
+    description="Uses LangChain PGVector to efficiently chunk, embed, and store documents",
     allowed_agents=["WebScraperRetrievalAgent"]
 )
 async def rag_upsert_tool(tool_input: dict, context: dict) -> dict:
     """
-    Chunk -> embed -> upsert to pgvector.
+    Uses LangChain PGVector to chunk, embed, and upsert documents to vector store.
     
     Args:
-        tool_input: {"documents": List[dict], "chunk_strategy": str}
+        tool_input: {"documents": List[dict], "collection_name": str}
         context: Additional context information
     """
     try:
-        from app.utils.chunker import SemanticChunker
-        from app.workers.embedding import EmbeddingGenerator
-        from app.db.database import db_manager
-        from app.db.models import Document, Chunk
-        from sqlalchemy import select
+        from langchain_postgres import PGVector
+        from langchain_openai import OpenAIEmbeddings
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+        from langchain_core.documents import Document as LangChainDocument
+        from app.config import config
+        import asyncio
         
         documents = tool_input.get("documents", [])
-        chunk_strategy = tool_input.get("chunk_strategy", "semantic")
+        collection_name = config.COLLECTION_NAME
         
         if not documents:
             return {"status": "error", "error": "Documents are required", "meta": {}}
         
-        # Initialize components
-        chunker = SemanticChunker()
-        embedder = EmbeddingGenerator()
+        # Initialize OpenAI embeddings with text-embedding-3-large
+        embeddings = OpenAIEmbeddings(
+            model=config.EMBEDDING_MODEL,
+            openai_api_key=config.OPENAI_API_KEY
+        )
+        
+        # Initialize PGVector
+        connection_string = config.DATABASE_URL.replace("+asyncpg", "")  # PGVector uses sync connection
+        vectorstore = PGVector(
+            connection=connection_string,
+            embeddings=embeddings,
+            collection_name=collection_name
+        )
+        
+        # Initialize text splitter for chunking
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=config.MAX_CHUNK_TOKENS * 4,  # Approximate tokens to characters
+            chunk_overlap=int(config.MAX_CHUNK_TOKENS * 4 * config.CHUNK_OVERLAP_RATIO),
+            length_function=len,
+            separators=["\n\n", "\n", ". ", " ", ""]
+        )
         
         processed_documents = []
         total_chunks = 0
         
-        async with db_manager.get_session() as session:
-            for doc_data in documents:
-                try:
-                    # Check if document already exists
-                    existing_doc = await session.execute(
-                        select(Document).where(Document.url == doc_data["url"])
-                    )
-                    existing_doc = existing_doc.scalar_one_or_none()
-                    
-                    if existing_doc:
-                        logger.info(f"Document already exists: {doc_data['url']}")
-                        continue
-                    
-                    # Create document record
-                    document = Document(
-                        url=doc_data["url"],
-                        title=doc_data.get("title", ""),
-                        raw_html=doc_data.get("raw_html", ""),
-                        cleaned_text=doc_data.get("cleaned_text", ""),
-                        language=doc_data.get("language", "en"),
-                        source_trust_score=doc_data.get("source_trust_score", 0.5),
-                        publish_date=doc_data.get("publish_date"),
-                        license=doc_data.get("license")
-                    )
-                    
-                    session.add(document)
-                    await session.flush()  # Get the document ID
-                    
-                    # Chunk the document
-                    chunks = await chunker.chunk_document(
-                        document.cleaned_text,
-                        {"document_id": document.id, "url": document.url}
-                    )
-                    
-                    # Generate embeddings and create chunk records
-                    chunk_texts = [chunk.chunk_text for chunk in chunks]
-                    embeddings = await embedder.generate_embeddings(chunk_texts)
-                    
-                    for chunk_data, embedding in zip(chunks, embeddings):
-                        chunk = Chunk(
-                            document_id=document.id,
-                            chunk_text=chunk_data.chunk_text,
-                            token_count=chunk_data.token_count,
-                            chunk_meta=chunk_data.chunk_meta,
-                            embedding=embedding
-                        )
-                        session.add(chunk)
-                    
-                    total_chunks += len(chunks)
-                    processed_documents.append({
-                        "document_id": document.id,
-                        "url": document.url,
-                        "chunks_created": len(chunks)
-                    })
-                    
-                except Exception as e:
-                    logger.error(f"Failed to process document {doc_data.get('url', 'unknown')}: {e}")
-                    continue
+        # Convert documents to LangChain Document format
+        langchain_docs = []
+        for doc_data in documents:
+            content = doc_data.get("cleaned_text", "")
+            if content:
+                langchain_doc = LangChainDocument(
+                    page_content=content,
+                    metadata={
+                        "url": doc_data.get("url", ""),
+                        "title": doc_data.get("title", ""),
+                        "source_trust_score": doc_data.get("source_trust_score", 0.5),
+                        "language": doc_data.get("language", "en"),
+                        "extraction_method": doc_data.get("extraction_method", "unknown")
+                    }
+                )
+                langchain_docs.append(langchain_doc)
+        
+        if not langchain_docs:
+            return {"status": "error", "error": "No valid documents to process", "meta": {}}
+        
+        # Split documents into chunks
+        chunks = text_splitter.split_documents(langchain_docs)
+        total_chunks = len(chunks)
+        
+        # Add documents to vector store in batches
+        batch_size = 10
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i:i + batch_size]
+            try:
+                # Use asyncio.to_thread for sync operations
+                await asyncio.to_thread(vectorstore.add_documents, batch)
+                logger.info(f"Added batch {i//batch_size + 1}/{(len(chunks) + batch_size - 1)//batch_size}")
+            except Exception as e:
+                logger.error(f"Failed to add batch {i//batch_size + 1}: {e}")
+                continue
+        
+        # Track processed documents
+        for doc in langchain_docs:
+            processed_documents.append({
+                "url": doc.metadata.get("url", ""),
+                "title": doc.metadata.get("title", ""),
+                "chunks_created": len([c for c in chunks if c.metadata.get("url") == doc.metadata.get("url")])
+            })
         
         return {
             "status": "ok",
             "result": {
                 "processed_documents": processed_documents,
                 "total_documents": len(processed_documents),
-                "total_chunks": total_chunks
+                "total_chunks": total_chunks,
+                "collection_name": collection_name
             },
             "meta": {
-                "chunk_strategy": chunk_strategy,
-                "embedding_model": "text-embedding-3-small"
+                "vector_store": "langchain_pgvector",
+                "embedding_model": config.EMBEDDING_MODEL,
+                "chunk_strategy": "recursive_character_splitter",
+                "batch_size": batch_size
             }
         }
         
@@ -708,85 +1297,151 @@ async def rag_upsert_tool(tool_input: dict, context: dict) -> dict:
 # ============================================================================
 
 @mcp_tool(
-    name="comparative_analysis",
-    description="Performs cross-document comparative analysis to identify patterns and differences",
+    name="comprehensive_analysis",
+    description="Uses GPT-4o to generate comprehensive 2000-word analysis with proper headings and structure",
     allowed_agents=["DeepAnalysisAgent"]
 )
-async def comparative_analysis_tool(tool_input: dict, context: dict) -> dict:
+async def comprehensive_analysis_tool(tool_input: dict, context: dict) -> dict:
     """
-    Create Comparative Analysis Tool for cross-document analysis.
+    Uses GPT-4o to generate comprehensive analysis (2000 words) with proper structure.
     
     Args:
-        tool_input: {"documents": List[dict], "comparison_dimensions": List[str]}
+        tool_input: {"query": str, "context_documents": List[dict], "analysis_type": str}
         context: Additional context information
     """
     try:
-        documents = tool_input.get("documents", [])
-        comparison_dimensions = tool_input.get("comparison_dimensions", ["content", "methodology", "conclusions"])
+        import openai
+        from app.config import config
         
-        if len(documents) < 2:
-            return {"status": "error", "error": "At least 2 documents required for comparison", "meta": {}}
+        query = tool_input.get("query", "")
+        context_documents = tool_input.get("context_documents", [])
+        analysis_type = tool_input.get("analysis_type", "comprehensive")
         
-        comparisons = []
+        if not query:
+            return {"status": "error", "error": "Query is required", "meta": {}}
         
-        # Compare documents pairwise
-        for i in range(len(documents)):
-            for j in range(i + 1, len(documents)):
-                doc1, doc2 = documents[i], documents[j]
-                
-                comparison = {
-                    "document_pair": [doc1.get("id", i), doc2.get("id", j)],
-                    "titles": [doc1.get("title", ""), doc2.get("title", "")],
-                    "similarities": [],
-                    "differences": [],
-                    "confidence": 0.0
+        if not context_documents:
+            return {"status": "error", "error": "Context documents are required", "meta": {}}
+        
+        # Initialize OpenAI client
+        client = openai.AsyncOpenAI(api_key=config.OPENAI_API_KEY)
+        
+        # Prepare context from documents
+        context_text = ""
+        for i, doc in enumerate(context_documents[:10]):  # Limit to top 10 documents
+            content = doc.get("content", doc.get("chunk_text", ""))
+            title = doc.get("title", doc.get("document_title", f"Document {i+1}"))
+            url = doc.get("url", doc.get("document_url", ""))
+            
+            context_text += f"\n\n--- Source {i+1}: {title} ---\n"
+            if url:
+                context_text += f"URL: {url}\n"
+            context_text += f"{content[:1500]}..."  # Limit each document to 1500 chars
+        
+        # Create comprehensive analysis prompt
+        prompt = f"""
+You are an expert research analyst tasked with creating a comprehensive, in-depth analysis report.
+
+Research Question: {query}
+
+Based on the following source materials, create a detailed analytical report of approximately 2000 words with proper academic structure and headings.
+
+Source Materials:
+{context_text}
+
+Your analysis should include:
+
+1. **Executive Summary** (200 words)
+   - Key findings and main conclusions
+   - Brief overview of methodology and sources
+
+2. **Introduction and Background** (300 words)
+   - Context and significance of the research question
+   - Scope and limitations of the analysis
+   - Overview of sources and their credibility
+
+3. **Methodology and Approach** (200 words)
+   - Analytical framework used
+   - Source evaluation criteria
+   - Limitations and assumptions
+
+4. **Detailed Analysis** (800 words)
+   - Break this into 3-4 subsections with clear headings
+   - Present findings with supporting evidence
+   - Include comparative analysis where relevant
+   - Discuss trends, patterns, and relationships
+   - Address contradictions or conflicting information
+
+5. **Implications and Significance** (300 words)
+   - Broader implications of findings
+   - Policy or practical recommendations
+   - Areas for further research
+
+6. **Conclusion** (200 words)
+   - Summary of key insights
+   - Final assessment and recommendations
+
+Requirements:
+- Use proper academic tone and structure
+- Include specific references to source materials
+- Provide evidence-based conclusions
+- Address multiple perspectives where available
+- Maintain objectivity while drawing clear insights
+- Use clear headings and subheadings
+- Ensure logical flow between sections
+
+Generate a comprehensive, well-structured analysis that demonstrates deep understanding of the topic.
+"""
+
+        try:
+            # Call OpenAI API for comprehensive analysis
+            response = await client.chat.completions.create(
+                model=config.ANALYSIS_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are an expert research analyst specializing in comprehensive policy and academic analysis. You create detailed, well-structured reports with proper academic rigor."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=4000  # Allow for comprehensive response
+            )
+            
+            analysis_content = response.choices[0].message.content
+            
+            # Extract key insights and structure
+            sections = _extract_analysis_sections(analysis_content)
+            
+            return {
+                "status": "ok",
+                "result": {
+                    "comprehensive_analysis": analysis_content,
+                    "sections": sections,
+                    "word_count": len(analysis_content.split()),
+                    "source_count": len(context_documents),
+                    "analysis_type": analysis_type,
+                    "query": query
+                },
+                "meta": {
+                    "analysis_method": "openai_gpt4o_comprehensive",
+                    "model_used": config.ANALYSIS_MODEL,
+                    "prompt_tokens": response.usage.prompt_tokens if hasattr(response, 'usage') else 0,
+                    "completion_tokens": response.usage.completion_tokens if hasattr(response, 'usage') else 0,
+                    "context_documents": len(context_documents)
                 }
-                
-                # Analyze each dimension
-                for dimension in comparison_dimensions:
-                    similarity_score = await _calculate_text_similarity(
-                        doc1.get("content", ""), 
-                        doc2.get("content", "")
-                    )
-                    
-                    if similarity_score > 0.7:
-                        comparison["similarities"].append({
-                            "dimension": dimension,
-                            "score": similarity_score,
-                            "description": f"High similarity in {dimension}"
-                        })
-                    elif similarity_score < 0.3:
-                        comparison["differences"].append({
-                            "dimension": dimension,
-                            "score": similarity_score,
-                            "description": f"Significant difference in {dimension}"
-                        })
-                
-                # Calculate overall confidence
-                comparison["confidence"] = sum(s["score"] for s in comparison["similarities"]) / len(comparison_dimensions) if comparison_dimensions else 0.0
-                comparisons.append(comparison)
-        
-        # Generate insights
-        insights = await _generate_comparative_insights(comparisons)
-        
-        return {
-            "status": "ok",
-            "result": {
-                "comparisons": comparisons,
-                "insights": insights,
-                "total_comparisons": len(comparisons)
-            },
-            "meta": {
-                "analysis_method": "pairwise_comparison",
-                "dimensions_analyzed": comparison_dimensions
             }
-        }
+            
+        except Exception as e:
+            logger.error(f"OpenAI API call failed: {e}")
+            return {
+                "status": "error",
+                "error": f"Comprehensive analysis failed: {str(e)}",
+                "meta": {}
+            }
         
     except Exception as e:
-        logger.error(f"Comparative analysis failed: {e}")
+        logger.error(f"Comprehensive analysis failed: {e}")
         return {
             "status": "error",
-            "error": f"Comparative analysis failed: {str(e)}",
+            "error": f"Comprehensive analysis failed: {str(e)}",
             "meta": {}
         }
 
@@ -1142,84 +1797,176 @@ async def _calculate_correlations(datasets: dict) -> dict:
 
 @mcp_tool(
     name="source_credibility_checker",
-    description="Evaluates source credibility and trustworthiness based on multiple factors",
+    description="Uses GPT-4o to evaluate source credibility and trustworthiness comprehensively",
     allowed_agents=["FactCheckingAgent"]
 )
 async def source_credibility_checker_tool(tool_input: dict, context: dict) -> dict:
     """
-    Create Source Credibility Checker for trust scoring.
+    Uses OpenAI GPT-4o to evaluate source credibility and trustworthiness.
     
     Args:
-        tool_input: {"sources": List[dict], "criteria": List[str]}
+        tool_input: {"sources": List[dict], "query_context": str}
         context: Additional context information
     """
     try:
+        import openai
+        from app.config import config
+        
         sources = tool_input.get("sources", [])
-        criteria = tool_input.get("criteria", ["domain_authority", "publication_date", "author_credentials", "citation_count"])
+        query_context = tool_input.get("query_context", "")
         
         if not sources:
             return {"status": "error", "error": "Sources are required", "meta": {}}
         
-        credibility_scores = []
+        # Initialize OpenAI client
+        client = openai.AsyncOpenAI(api_key=config.OPENAI_API_KEY)
         
-        for source in sources:
-            score_components = {}
-            total_score = 0.0
-            max_score = 0.0
+        # Prepare sources for analysis
+        sources_text = ""
+        for i, source in enumerate(sources, 1):
+            url = source.get("url", "")
+            title = source.get("title", "")
+            content_preview = source.get("content", "")[:300] + "..." if source.get("content") else ""
             
-            # Domain authority scoring
-            if "domain_authority" in criteria:
-                domain_score = await _evaluate_domain_authority(source.get("url", ""))
-                score_components["domain_authority"] = domain_score
-                total_score += domain_score * 0.3
-                max_score += 0.3
-            
-            # Publication date recency
-            if "publication_date" in criteria:
-                date_score = await _evaluate_publication_recency(source.get("publish_date"))
-                score_components["publication_recency"] = date_score
-                total_score += date_score * 0.2
-                max_score += 0.2
-            
-            # Author credentials (simplified)
-            if "author_credentials" in criteria:
-                author_score = await _evaluate_author_credentials(source.get("author", ""))
-                score_components["author_credentials"] = author_score
-                total_score += author_score * 0.2
-                max_score += 0.2
-            
-            # Citation/reference count
-            if "citation_count" in criteria:
-                citation_score = await _evaluate_citations(source.get("citations", 0))
-                score_components["citation_score"] = citation_score
-                total_score += citation_score * 0.3
-                max_score += 0.3
-            
-            # Normalize score
-            final_score = total_score / max_score if max_score > 0 else 0.0
-            
-            credibility_scores.append({
-                "source_id": source.get("id", "unknown"),
-                "url": source.get("url", ""),
-                "title": source.get("title", ""),
-                "credibility_score": round(final_score, 3),
-                "score_components": score_components,
-                "trust_level": _get_trust_level(final_score),
-                "recommendations": await _generate_credibility_recommendations(final_score, score_components)
-            })
+            sources_text += f"\n{i}. Title: {title}\n"
+            sources_text += f"   URL: {url}\n"
+            if content_preview:
+                sources_text += f"   Content Preview: {content_preview}\n"
         
-        return {
-            "status": "ok",
-            "result": {
-                "credibility_scores": credibility_scores,
-                "average_credibility": sum(s["credibility_score"] for s in credibility_scores) / len(credibility_scores),
-                "high_credibility_sources": [s for s in credibility_scores if s["credibility_score"] > 0.7]
-            },
-            "meta": {
-                "evaluation_criteria": criteria,
-                "total_sources": len(sources)
+        # Create credibility evaluation prompt
+        prompt = f"""
+You are an expert information literacy specialist tasked with evaluating the credibility and trustworthiness of sources for research purposes.
+
+Research Context: {query_context}
+
+Sources to Evaluate:
+{sources_text}
+
+For each source, evaluate credibility based on:
+
+1. **Domain Authority & Reputation**
+   - Is this a well-known, reputable organization?
+   - What type of organization is it (academic, government, news, commercial, etc.)?
+   - Does the domain have a history of reliable information?
+
+2. **Content Quality & Expertise**
+   - Does the content demonstrate expertise and knowledge?
+   - Are claims supported by evidence or citations?
+   - Is the writing professional and well-researched?
+
+3. **Bias and Objectivity**
+   - Does the source present balanced information?
+   - Are there obvious commercial or political biases?
+   - Is the tone objective and factual?
+
+4. **Relevance and Currency**
+   - How relevant is this source to the research question?
+   - Is the information current and up-to-date?
+   - Does it provide unique or valuable insights?
+
+For each source, provide:
+- Credibility score (0.0-1.0, where 1.0 = highest credibility)
+- Trust level (very_high/high/medium/low/very_low)
+- Strengths and weaknesses
+- Specific recommendations for use
+- Bias assessment
+
+Format as JSON array:
+[
+  {{
+    "source_id": 1,
+    "credibility_score": 0.85,
+    "trust_level": "high",
+    "domain_type": "academic|government|news|commercial|nonprofit|other",
+    "strengths": ["List of credibility strengths"],
+    "weaknesses": ["List of credibility concerns"],
+    "bias_assessment": "Description of any detected bias",
+    "recommendations": "How to best use this source",
+    "relevance_score": 0.9
+  }}
+]
+
+Evaluate all {len(sources)} sources.
+"""
+
+        try:
+            # Call OpenAI API
+            response = await client.chat.completions.create(
+                model=config.REASONING_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are an expert information literacy specialist with extensive experience in evaluating source credibility for academic and professional research."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.2,
+                max_tokens=2000
+            )
+            
+            # Parse the response
+            response_content = response.choices[0].message.content
+            
+            # Extract JSON from the response
+            import json
+            json_match = re.search(r'\[.*\]', response_content, re.DOTALL)
+            if json_match:
+                credibility_data = json.loads(json_match.group())
+            else:
+                credibility_data = json.loads(response_content)
+            
+            # Process and validate the credibility scores
+            credibility_scores = []
+            for i, cred_data in enumerate(credibility_data):
+                if isinstance(cred_data, dict):
+                    original_source = sources[i] if i < len(sources) else sources[0]
+                    
+                    credibility_scores.append({
+                        "source_id": cred_data.get("source_id", i+1),
+                        "url": original_source.get("url", ""),
+                        "title": original_source.get("title", ""),
+                        "credibility_score": cred_data.get("credibility_score", 0.5),
+                        "trust_level": cred_data.get("trust_level", "medium"),
+                        "domain_type": cred_data.get("domain_type", "other"),
+                        "strengths": cred_data.get("strengths", []),
+                        "weaknesses": cred_data.get("weaknesses", []),
+                        "bias_assessment": cred_data.get("bias_assessment", ""),
+                        "recommendations": cred_data.get("recommendations", ""),
+                        "relevance_score": cred_data.get("relevance_score", 0.5)
+                    })
+            
+            # Calculate overall statistics
+            avg_credibility = sum(s["credibility_score"] for s in credibility_scores) / len(credibility_scores) if credibility_scores else 0
+            high_credibility_sources = [s for s in credibility_scores if s["credibility_score"] > 0.7]
+            
+            return {
+                "status": "ok",
+                "result": {
+                    "credibility_scores": credibility_scores,
+                    "average_credibility": avg_credibility,
+                    "high_credibility_sources": high_credibility_sources,
+                    "total_sources": len(credibility_scores)
+                },
+                "meta": {
+                    "evaluation_method": "openai_gpt4o_comprehensive",
+                    "model_used": config.REASONING_MODEL,
+                    "prompt_tokens": response.usage.prompt_tokens if hasattr(response, 'usage') else 0,
+                    "completion_tokens": response.usage.completion_tokens if hasattr(response, 'usage') else 0
+                }
             }
-        }
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse LLM response as JSON: {e}")
+            return {
+                "status": "error",
+                "error": f"Failed to parse credibility evaluation: {str(e)}",
+                "meta": {}
+            }
+            
+        except Exception as e:
+            logger.error(f"OpenAI API call failed: {e}")
+            return {
+                "status": "error",
+                "error": f"Source credibility check failed: {str(e)}",
+                "meta": {}
+            }
         
     except Exception as e:
         logger.error(f"Source credibility check failed: {e}")
@@ -2328,3 +3075,30 @@ async def _generate_default_summary(content: dict) -> str:
 async def _generate_default_findings(content: dict) -> str:
     """Generate default findings when no specific findings are provided."""
     return "Key findings will be presented based on the analysis of available data and sources."
+
+
+def _extract_analysis_sections(content: str) -> dict:
+    """Extract sections from the analysis content."""
+    sections = {}
+    current_section = "introduction"
+    current_content = []
+    
+    lines = content.split('\n')
+    for line in lines:
+        if line.startswith('#') or (line.startswith('**') and line.endswith('**')):
+            # Save previous section
+            if current_content:
+                sections[current_section] = '\n'.join(current_content).strip()
+            
+            # Start new section
+            section_title = line.strip('#').strip('*').strip().lower().replace(' ', '_')
+            current_section = section_title
+            current_content = []
+        else:
+            current_content.append(line)
+    
+    # Save last section
+    if current_content:
+        sections[current_section] = '\n'.join(current_content).strip()
+    
+    return sections

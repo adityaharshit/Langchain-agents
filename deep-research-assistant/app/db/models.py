@@ -47,7 +47,7 @@ class Chunk(Base):
     chunk_text: Mapped[str] = mapped_column(Text, nullable=False)
     token_count: Mapped[int] = mapped_column(Integer, nullable=False)
     chunk_meta: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=True)
-    embedding: Mapped[Optional[list]] = mapped_column(Vector(1536), nullable=True)  # OpenAI text-embedding-3-small
+    embedding: Mapped[Optional[list]] = mapped_column(Vector(3072), nullable=True)  # OpenAI text-embedding-3-large
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=func.now())
     
     # Relationships

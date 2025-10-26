@@ -41,6 +41,26 @@ class ResearchCoordinatorAgent:
                 )
                 
                 if decomposition_result["status"] == "ok":
+                    subqueries_data = decomposition_result["result"]["subqueries"]
+                    state["subqueries"] = [sq["subquery"] for sq in subqueries_data]
+                    
+                    # Prioritize the subqueries using GPT-4o
+                    prioritization_result = await mcp_registry.execute_tool(
+                        "task_prioritizer",
+                        self.name,
+                        {
+                            "tasks": subqueries_data,
+                            "main_query": state["query"]
+                        },
+                        {"task_id": state["task_id"]}
+                    )
+                    
+                    if prioritization_result["status"] == "ok":
+                        # Update subqueries with prioritized order
+                        prioritized_tasks = prioritization_result["result"]["prioritized_tasks"]
+                        state["subqueries"] = [task["task"]["subquery"] for task in prioritized_tasks]
+                
+                if decomposition_result["status"] == "ok":
                     state["subqueries"] = [
                         sq["subquery"] for sq in decomposition_result["result"]["subqueries"]
                     ]
@@ -76,9 +96,10 @@ class ResearchCoordinatorAgent:
                 state["confidence_score"] = retrieval_result.confidence_score
             
             # Add coordinator message
+            decomp_method = decomposition_result.get("meta", {}).get("decomposition_method", "unknown") if decomposition_result["status"] == "ok" else "failed"
             state["messages"].append({
-                "role": "coordinator",
-                "content": f"Query decomposed. Initial retrieval confidence: {state['confidence_score']:.2f}",
+                "role": "system",
+                "content": f"Query intelligently decomposed using {decomp_method} into {len(state['subqueries'])} prioritized subqueries. Initial retrieval confidence: {state['confidence_score']:.2f}",
                 "timestamp": datetime.utcnow().isoformat()
             })
             
@@ -96,9 +117,9 @@ class WebScraperRetrievalAgent:
     def __init__(self):
         self.name = "WebScraperRetrievalAgent"
         self.allowed_tools = [
-            "keyword_search",
+            "intelligent_url_generator",
+            "semantic_search",
             "web_scraper",
-            "semantic_scraping", 
             "rag_upsert"
         ]
     
@@ -107,8 +128,33 @@ class WebScraperRetrievalAgent:
         try:
             logger.info(f"WebScraperAgent processing query: {state['query'][:50]}...")
             
-            # Generate search URLs from subqueries
-            search_urls = self._generate_search_urls(state.get("subqueries", [state["query"]]))
+            # Generate intelligent URLs using LLM
+            url_generation_result = await mcp_registry.execute_tool(
+                "intelligent_url_generator",
+                self.name,
+                {
+                    "query": state["query"],
+                    "subqueries": state.get("subqueries", []),
+                    "max_urls": 8,
+                    "domains": []  # Let LLM choose the best domains
+                },
+                {"task_id": state["task_id"]}
+            )
+            
+            # Extract URLs from the generation result
+            if url_generation_result["status"] == "ok":
+                generated_url_data = url_generation_result["result"]["generated_urls"]
+                search_urls = [url_data["url"] for url_data in generated_url_data]
+                
+                logger.info(f"Generated {len(search_urls)} intelligent URLs using {url_generation_result['meta'].get('generation_method', 'unknown')} method")
+                
+                # Log some example URLs for debugging
+                for i, url_data in enumerate(generated_url_data[:3]):
+                    logger.info(f"  URL {i+1}: {url_data['url']} ({url_data['content_type']}) - {url_data['description'][:100]}...")
+            else:
+                # Fallback to simple URL generation if LLM fails
+                logger.warning(f"Intelligent URL generation failed: {url_generation_result.get('error', 'Unknown error')}")
+                search_urls = self._generate_search_urls(state.get("subqueries", [state["query"]]))
             
             # Scrape URLs
             scraping_result = await mcp_registry.execute_tool(
@@ -162,9 +208,11 @@ class WebScraperRetrievalAgent:
                         state["confidence_score"] = retrieval_result.confidence_score
             
             # Add scraper message
+            url_gen_method = url_generation_result.get("meta", {}).get("generation_method", "fallback") if url_generation_result["status"] == "ok" else "fallback"
             state["messages"].append({
-                "role": "scraper",
-                "content": f"Scraped {len(state.get('scraped_documents', []))} documents. "
+                "role": "system",
+                "content": f"Generated {len(search_urls)} URLs using {url_gen_method}. "
+                          f"Scraped {len(state.get('scraped_documents', []))} documents. "
                           f"Updated confidence: {state['confidence_score']:.2f}",
                 "timestamp": datetime.utcnow().isoformat()
             })
@@ -198,10 +246,8 @@ class DeepAnalysisAgent:
     def __init__(self):
         self.name = "DeepAnalysisAgent"
         self.allowed_tools = [
-            "comparative_analysis",
-            "trend_analysis",
-            "causal_reasoning",
-            "statistical_analysis"
+            "comprehensive_analysis",
+            "semantic_search"
         ]
     
     async def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -215,65 +261,49 @@ class DeepAnalysisAgent:
                 state["analysis_results"] = {"error": "No retrieval results to analyze"}
                 return state
             
-            # Prepare documents for analysis
-            documents = []
+            # Prepare documents for comprehensive analysis
+            context_documents = []
             for result in retrieval_results:
-                documents.append({
-                    "id": result["chunk_id"],
-                    "title": result["document_title"],
+                context_documents.append({
+                    "chunk_id": result["chunk_id"],
+                    "document_title": result["document_title"],
                     "content": result["chunk_text"],
-                    "url": result["document_url"],
-                    "similarity": result["similarity_score"]
+                    "document_url": result["document_url"],
+                    "similarity_score": result["similarity_score"],
+                    "token_count": result.get("token_count", 0)
                 })
             
-            analysis_results = {}
-            
-            # Comparative Analysis
-            comparative_result = await mcp_registry.execute_tool(
-                "comparative_analysis",
-                self.name,
-                {"documents": documents, "comparison_dimensions": ["content", "conclusions"]},
-                {"task_id": state["task_id"]}
-            )
-            
-            if comparative_result["status"] == "ok":
-                analysis_results["comparative"] = comparative_result["result"]
-            
-            # Trend Analysis
-            data_points = self._extract_data_points(documents)
-            if data_points:
-                trend_result = await mcp_registry.execute_tool(
-                    "trend_analysis",
-                    self.name,
-                    {"data_points": data_points, "time_dimension": "date", "metrics": ["value"]},
-                    {"task_id": state["task_id"]}
-                )
-                
-                if trend_result["status"] == "ok":
-                    analysis_results["trend"] = trend_result["result"]
-            
-            # Causal Reasoning
-            events = self._extract_events(documents, state["query"])
-            causal_result = await mcp_registry.execute_tool(
-                "causal_reasoning",
+            # Perform comprehensive analysis using GPT-4o
+            analysis_result = await mcp_registry.execute_tool(
+                "comprehensive_analysis",
                 self.name,
                 {
-                    "events": events,
-                    "potential_causes": self._extract_causes(state["query"]),
-                    "effects": self._extract_effects(state["query"])
+                    "query": state["query"],
+                    "context_documents": context_documents,
+                    "analysis_type": "comprehensive_research"
                 },
                 {"task_id": state["task_id"]}
             )
             
-            if causal_result["status"] == "ok":
-                analysis_results["causal"] = causal_result["result"]
-            
-            state["analysis_results"] = analysis_results
+            if analysis_result["status"] == "ok":
+                state["analysis_results"] = {
+                    "comprehensive": analysis_result["result"],
+                    "source_documents": len(context_documents),
+                    "analysis_confidence": 0.8  # High confidence for GPT-4o analysis
+                }
+            else:
+                state["analysis_results"] = {
+                    "error": analysis_result.get("error", "Analysis failed"),
+                    "source_documents": len(context_documents)
+                }
             
             # Add analysis message
+            analysis_results = state.get("analysis_results", {})
+            word_count = analysis_results.get("comprehensive", {}).get("word_count", 0)
+            
             state["messages"].append({
-                "role": "analyst",
-                "content": f"Completed {len(analysis_results)} analysis types.",
+                "role": "system",
+                "content": f"Generated comprehensive analysis ({word_count} words) using GPT-4o with {len(context_documents)} source documents.",
                 "timestamp": datetime.utcnow().isoformat()
             })
             
@@ -386,7 +416,10 @@ class FactCheckingAgent:
             credibility_result = await mcp_registry.execute_tool(
                 "source_credibility_checker",
                 self.name,
-                {"sources": sources},
+                {
+                    "sources": sources,
+                    "query_context": state["query"]
+                },
                 {"task_id": state["task_id"]}
             )
             
@@ -455,7 +488,7 @@ class FactCheckingAgent:
             contradictions = len(fact_check_results.get("contradictions", {}).get("contradictions", []))
             
             state["messages"].append({
-                "role": "fact_checker",
+                "role": "system",
                 "content": f"Fact-checking complete. Final confidence: {state['confidence_score']:.2f}. "
                           f"Found {contradictions} contradictions.",
                 "timestamp": datetime.utcnow().isoformat()
@@ -596,7 +629,7 @@ class OutputFormattingAgent:
             
             # Add final message
             state["messages"].append({
-                "role": "formatter",
+                "role": "system",
                 "content": f"Final report generated with {len(citations)} citations.",
                 "timestamp": datetime.utcnow().isoformat()
             })

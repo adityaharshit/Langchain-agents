@@ -2,3 +2,6 @@
 /.venv
 /Harshith.pdf
 /main.ipynb
+.env
+./.env
+/deep-research-assistant/.env

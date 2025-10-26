@@ -133,7 +133,7 @@ class VectorStore:
             List of search results ordered by similarity
         """
         k = k or self.default_k
-        similarity_threshold = similarity_threshold or self.similarity_threshold
+        similarity_threshold = self.similarity_threshold
         
         try:
             # Generate query embedding
@@ -142,6 +142,9 @@ class VectorStore:
             if not query_embedding or all(x == 0 for x in query_embedding):
                 logger.warning("Query embedding is empty or zero vector")
                 return []
+            
+            query_embedding = "[" + ", ".join(str(x) for x in query_embedding) + "]"
+
             
             # Build search query
             search_query = text("""
@@ -179,7 +182,7 @@ class VectorStore:
             async with db_manager.get_session() as session:
                 result = await session.execute(search_query, params)
                 rows = result.fetchall()
-            
+            print("SEMANTIC SEARCH RESULTS:" + rows)
             # Convert to SearchResult objects
             search_results = []
             for row in rows:

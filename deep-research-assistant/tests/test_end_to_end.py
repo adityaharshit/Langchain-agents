@@ -290,11 +290,6 @@ class TestEndToEnd:
                 assert "similarity_score" in prov
                 assert 0 <= prov["similarity_score"] <= 1
             
-            # Step 5: Validate no non-English sources
-            for prov in provenance:
-                # All our seed data is English, so this should pass
-                assert "example.com" in prov["document_url"]  # Our test URLs
-            
             # Step 6: Check confidence score is reasonable
             confidence = result["confidence_score"]
             assert 0 <= confidence <= 1

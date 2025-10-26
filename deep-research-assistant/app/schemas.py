@@ -204,7 +204,7 @@ class SystemConfig(BaseModel):
     scrape_rate_limit: float = 1.0
     retrieval_k: int = 8
     confidence_threshold: float = 0.7
-    similarity_threshold: float = 0.75
+    similarity_threshold: float = 0.4
 
 
 # Batch Processing Schemas

@@ -1,1 +1,3 @@
-# Utilities module
+"""
+Utility modules for Deep Research Assistant.
+"""

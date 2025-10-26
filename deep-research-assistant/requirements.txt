@@ -12,16 +12,20 @@ sqlalchemy[asyncio]
 asyncpg
 pgvector
 psycopg2-binary
+langchain-postgres
 
 # AI and Embeddings
 openai
 tiktoken
+langchain-openai
 
 # Web Scraping and HTTP
 aiohttp
 playwright
 beautifulsoup4
 readability-lxml
+langchain
+langchain-community
 # urllib-robotparser
 
 # Text Processing and Language Detection

@@ -20,6 +20,10 @@ class Config:
     # OpenAI Configuration
     OPENAI_API_KEY: Optional[str] = None
     EMBEDDING_MODEL: str = "text-embedding-3-large"
+    ANALYSIS_MODEL: str = "gpt-4o"
+    REASONING_MODEL: str = "gpt-4o"
+    DECOMPOSITION_MODEL: str = "gpt-4o"
+    COLLECTION_NAME: str = "research_documents"
     
     # Chunking Configuration
     MIN_CHUNK_TOKENS: int = 150
@@ -28,17 +32,22 @@ class Config:
     
     # Retrieval Configuration
     RETRIEVAL_K: int = 8
-    CONFIDENCE_THRESHOLD: float = 0.7
-    SIMILARITY_THRESHOLD: float = 0.75
+    CONFIDENCE_THRESHOLD: float = 0.6
+    SIMILARITY_THRESHOLD: float = 0
     
     # Scraping Configuration
     MAX_CONCURRENT_SCRAPES: int = 5
     SCRAPE_RATE_LIMIT: float = 1.0  # seconds between requests
     REQUEST_TIMEOUT: int = 30
     
+    # Intelligent URL Generation
+    URL_GENERATION_MODEL: str = "gpt-4o"
+    MAX_GENERATED_URLS: int = 10
+    URL_GENERATION_TEMPERATURE: float = 0.3
+    
     # Embedding Configuration
     EMBEDDING_BATCH_SIZE: int = 16
-    EMBEDDING_DIMENSION: int = 1536  # text-embedding-3-small dimension
+    EMBEDDING_DIMENSION: int = 3072  # text-embedding-3-large dimension
     
     # System Configuration
     LOG_LEVEL: str = "INFO"
