@@ -1,16 +1,13 @@
 """
 Individual agent implementations for the multi-agent research system.
 """
-import asyncio
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 from datetime import datetime
 import re
 
 from app.mcp import mcp_registry
-from app.workers.vector_store import retrieve_with_confidence
 from app.config import config
-from app.mcp_tools import semantic_search_tool
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +21,8 @@ class ResearchCoordinatorAgent:
             "query_decomposer",
             "task_prioritizer", 
             "progress_tracker",
-            "result_synthesis"
+            "result_synthesis",
+            "semantic_search"
         ]
     
     async def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -70,30 +68,46 @@ class ResearchCoordinatorAgent:
             
             # Step 2: Initial RAG retrieval
             if not state.get("retrieval_results"):
-                retrieval_result = await semantic_search_tool(
-                    tool_input = state["query"],
-                    context = {}
+                retrieval_result = await mcp_registry.execute_tool(
+                    "semantic_search",
+                    self.name,
+                    {
+                        "query": state["query"],
+                        "k": config.RETRIEVAL_K
+                    },
+                    {"task_id": state["task_id"]}
                 )
                 
-                state["retrieval_results"] = {
-                    "results": [
-                        {
-                            "chunk_id": r.chunk_id,
-                            "document_id": r.document_id,
-                            "chunk_text": r.chunk_text,
-                            "similarity_score": r.similarity_score,
-                            "document_title": r.document_title,
-                            "document_url": r.document_url,
-                            "chunk_meta": r.chunk_meta,
-                            "token_count": r.token_count
-                        }
-                        for r in retrieval_result.results
-                    ],
-                    "confidence_score": retrieval_result.confidence_score,
-                    "total_results": retrieval_result.total_results
-                }
-                
-                state["confidence_score"] = retrieval_result.confidence_score
+                if retrieval_result["status"] == "ok":
+                    # Transform semantic_search_tool results to match expected structure
+                    search_results = retrieval_result["result"]["results"]
+                    state["retrieval_results"] = {
+                        "results": [
+                            {
+                                "chunk_id": r.get("metadata", {}).get("chunk_id", 0),
+                                "document_id": r.get("metadata", {}).get("document_id", 0),
+                                "chunk_text": r["content"],
+                                "similarity_score": r["similarity_score"],
+                                "document_title": r["title"],
+                                "document_url": r["url"],
+                                "chunk_meta": r.get("metadata", {}),
+                                "token_count": r.get("metadata", {}).get("token_count", 0)
+                            }
+                            for r in search_results
+                        ],
+                        "confidence_score": retrieval_result["result"]["confidence_score"],
+                        "total_results": retrieval_result["result"]["total_results"]
+                    }
+                    
+                    state["confidence_score"] = retrieval_result["result"]["confidence_score"]
+                else:
+                    # Handle error case
+                    state["retrieval_results"] = {
+                        "results": [],
+                        "confidence_score": 0.0,
+                        "total_results": 0
+                    }
+                    state["confidence_score"] = 0.0
             
             # Add coordinator message
             decomp_method = decomposition_result.get("meta", {}).get("decomposition_method", "unknown") if decomposition_result["status"] == "ok" else "failed"
@@ -179,33 +193,39 @@ class WebScraperRetrievalAgent:
                     
                     if upsert_result["status"] == "ok":
                         # Re-run retrieval with new content
-                        retrieval_result = await semantic_search_tool(
-                            tool_input = state["query"],
-                            context = {}
+                        retrieval_result = await mcp_registry.execute_tool(
+                            "semantic_search",
+                            self.name,
+                            {
+                                "query": state["query"],
+                                "k": config.RETRIEVAL_K
+                            },
+                            {"task_id": state["task_id"]}
                         )
-                
                         
-                        # Update retrieval results
-                        state["retrieval_results"] = {
-                            "results": [
-                                {
-                                    "chunk_id": r.chunk_id,
-                                    "document_id": r.document_id,
-                                    "chunk_text": r.chunk_text,
-                                    "similarity_score": r.similarity_score,
-                                    "document_title": r.document_title,
-                                    "document_url": r.document_url,
-                                    "chunk_meta": r.chunk_meta,
-                                    "token_count": r.token_count
-                                }
-                                for r in retrieval_result.results
-                            ],
-                            "confidence_score": retrieval_result.confidence_score,
-                            "total_results": retrieval_result.total_results,
-                            "method": "post_scraping"
-                        }
-                        
-                        state["confidence_score"] = retrieval_result.confidence_score
+                        if retrieval_result["status"] == "ok":
+                            # Transform semantic_search_tool results to match expected structure
+                            search_results = retrieval_result["result"]["results"]
+                            state["retrieval_results"] = {
+                                "results": [
+                                    {
+                                        "chunk_id": r.get("metadata", {}).get("chunk_id", 0),
+                                        "document_id": r.get("metadata", {}).get("document_id", 0),
+                                        "chunk_text": r["content"],
+                                        "similarity_score": r["similarity_score"],
+                                        "document_title": r["title"],
+                                        "document_url": r["url"],
+                                        "chunk_meta": r.get("metadata", {}),
+                                        "token_count": r.get("metadata", {}).get("token_count", 0)
+                                    }
+                                    for r in search_results
+                                ],
+                                "confidence_score": retrieval_result["result"]["confidence_score"],
+                                "total_results": retrieval_result["result"]["total_results"],
+                                "method": "post_scraping"
+                            }
+                            
+                            state["confidence_score"] = retrieval_result["result"]["confidence_score"]
             
             # Add scraper message
             url_gen_method = url_generation_result.get("meta", {}).get("generation_method", "fallback") if url_generation_result["status"] == "ok" else "fallback"
@@ -253,7 +273,7 @@ class DeepAnalysisAgent:
     async def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Execute the Deep Analysis Agent."""
         try:
-            logger.info(f"DeepAnalysisAgent processing analysis...")
+            logger.info("DeepAnalysisAgent processing analysis...")
             
             retrieval_results = state.get("retrieval_results", {}).get("results", [])
             

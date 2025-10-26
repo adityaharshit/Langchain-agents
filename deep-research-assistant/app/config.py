@@ -32,7 +32,7 @@ class Config:
     
     # Retrieval Configuration
     RETRIEVAL_K: int = 8
-    CONFIDENCE_THRESHOLD: float = 0.6
+    CONFIDENCE_THRESHOLD: float = 0.4
     SIMILARITY_THRESHOLD: float = 0.3  # Minimum similarity score for semantic search (0.0-1.0)
     
     # Scraping Configuration
