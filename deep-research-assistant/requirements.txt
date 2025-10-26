@@ -6,7 +6,11 @@
 fastapi
 uvicorn
 langgraph
+starlette
+
+# MCP (Model Context Protocol)
 mcp
+fastmcp
 # Database and Vector Operations
 sqlalchemy[asyncio]
 asyncpg

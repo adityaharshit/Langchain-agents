@@ -68,6 +68,15 @@ async def startup_event():
             logger.error("Database health check failed")
             raise RuntimeError("Database connection failed")
         
+        # Initialize MCP client pool
+        from app.mcp_client import get_mcp_client_pool
+        try:
+            logger.info("App startup: MCP pool will initialize lazily on first request")
+            await get_mcp_client_pool()  
+        except Exception as e:
+            logger.warning(f"MCP client pool initialization failed: {e}")
+            logger.warning("Agents will not be able to access tools via MCP server")
+        
         logger.info("Deep Research Assistant started successfully")
         
     except Exception as e:
@@ -80,6 +89,11 @@ async def shutdown_event():
     """Cleanup on application shutdown."""
     try:
         logger.info("Shutting down Deep Research Assistant...")
+        
+        # Shutdown MCP client pool
+        from app.mcp_client import mcp_client_pool
+        if mcp_client_pool:
+            await mcp_client_pool.shutdown()
         
         # Close database connections
         await close_database()

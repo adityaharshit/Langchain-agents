@@ -92,7 +92,7 @@ class MCPRegistry:
         return agent_name in tool.allowed_agents
     
     async def execute_tool(self, tool_name: str, agent_name: str, tool_input: dict, context: dict = None) -> dict:
-        """Execute a tool with validation and logging."""
+        """Execute a tool with validation and logging via MCP client."""
         # Validate tool access
         if not self.validate_tool_access(tool_name, agent_name):
             error_msg = f"Agent '{agent_name}' not allowed to use tool '{tool_name}'"
@@ -129,13 +129,11 @@ class MCPRegistry:
         self._execution_log.append(log_entry)
         
         try:
-            logger.info(f"Executing tool '{tool_name}' for agent '{agent_name}'")
+            logger.info(f"Executing tool '{tool_name}' for agent '{agent_name}' via MCP")
             
-            # Execute the tool function
-            if asyncio.iscoroutinefunction(tool.function):
-                result = await tool.function(tool_input, context or {})
-            else:
-                result = tool.function(tool_input, context or {})
+            # Execute through MCP client
+            from app.mcp_client import execute_tool_via_mcp
+            result = await execute_tool_via_mcp(tool_name, agent_name, tool_input, context or {})
             
             # Update log entry
             log_entry.update({
@@ -144,7 +142,7 @@ class MCPRegistry:
                 "finished_at": asyncio.get_event_loop().time()
             })
             
-            logger.info(f"Tool '{tool_name}' executed successfully")
+            logger.info(f"Tool '{tool_name}' executed successfully via MCP")
             return result
             
         except Exception as e:

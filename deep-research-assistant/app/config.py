@@ -54,6 +54,10 @@ class Config:
     MAX_RETRIES: int = 3
     BACKOFF_FACTOR: float = 2.0
     
+    # MCP Server Configuration
+    MCP_SERVER_URL: str = "http://localhost:8000"
+    MCP_CLIENT_POOL_SIZE: int = 5
+    
     def __post_init__(self):
         """Load configuration from environment variables."""
         self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
