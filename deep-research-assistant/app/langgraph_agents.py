@@ -30,6 +30,8 @@ class ResearchState(TypedDict):
     retrieval_results: Optional[Dict[str, Any]]
     confidence_score: float
     subqueries: List[str]
+    subquery_retrieval_results: Dict[str, List[Dict[str, Any]]]  # Maps subquery to its retrieval results
+    subquery_scraped_documents: Dict[str, List[Dict[str, Any]]]  # Maps subquery to its scraped docs
     scraped_documents: List[Dict[str, Any]]
     analysis_results: Dict[str, Any]
     fact_check_results: Dict[str, Any]
@@ -164,6 +166,8 @@ class ResearchOrchestrator:
                 retrieval_results=None,
                 confidence_score=0.0,
                 subqueries=[],
+                subquery_retrieval_results={},
+                subquery_scraped_documents={},
                 scraped_documents=[],
                 analysis_results={},
                 fact_check_results={},

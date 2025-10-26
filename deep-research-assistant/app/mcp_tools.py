@@ -128,6 +128,18 @@ async def query_decomposer_tool(tool_input: dict, context: dict) -> dict:
             # Sort by priority
             subqueries.sort(key=lambda x: x["priority"])
 
+            # Print sub-queries to console for visibility
+            logger.info("=" * 80)
+            logger.info(f"QUERY DECOMPOSITION RESULTS ({len(subqueries)} sub-queries)")
+            logger.info("=" * 80)
+            logger.info(f"Original Query: {query}")
+            logger.info("-" * 80)
+            for i, sq in enumerate(subqueries, 1):
+                logger.info(f"\n{i}. {sq['subquery']}")
+                logger.info(f"   Priority: {sq['priority']} | Type: {sq['expected_info_type']} | Scope: {sq['research_scope']}")
+                logger.info(f"   Rationale: {sq['rationale']}")
+            logger.info("=" * 80)
+
             return {
                 "status": "ok",
                 "result": {
@@ -1456,6 +1468,8 @@ async def comprehensive_analysis_tool(tool_input: dict, context: dict) -> dict:
         query = tool_input.get("query", "")
         context_documents = tool_input.get("context_documents", [])
         analysis_type = tool_input.get("analysis_type", "comprehensive")
+        subqueries = tool_input.get("subqueries", [])
+        subquery_context_map = tool_input.get("subquery_context_map", {})
 
         if not query:
             return {"status": "error", "error": "Query is required", "meta": {}}
@@ -1470,23 +1484,48 @@ async def comprehensive_analysis_tool(tool_input: dict, context: dict) -> dict:
         # Initialize OpenAI client
         client = openai.AsyncOpenAI(api_key=config.OPENAI_API_KEY)
 
-        # Prepare context from documents
+        # Prepare context from documents, organized by subquery if available
         context_text = ""
-        for i, doc in enumerate(context_documents[:10]):  # Limit to top 10 documents
-            content = doc.get("content", doc.get("chunk_text", ""))
-            title = doc.get("title", doc.get("document_title", f"Document {i + 1}"))
-            url = doc.get("url", doc.get("document_url", ""))
+        
+        if subquery_context_map:
+            # Organize by subquery
+            context_text += "\n\n=== RESEARCH ORGANIZED BY SUB-QUESTIONS ===\n"
+            for subquery, docs in subquery_context_map.items():
+                context_text += f"\n\n### Sub-Question: {subquery}\n"
+                context_text += "Relevant Sources:\n"
+                for i, doc in enumerate(docs[:5]):  # Top 5 per subquery
+                    content = doc.get("content", "")
+                    title = doc.get("title", f"Document {i + 1}")
+                    context_text += f"\n**Source {i + 1}: {title}**\n"
+                    context_text += f"{content[:1000]}...\n"
+        else:
+            # Fallback to flat list
+            for i, doc in enumerate(context_documents[:10]):
+                content = doc.get("content", doc.get("chunk_text", ""))
+                title = doc.get("title", doc.get("document_title", f"Document {i + 1}"))
+                url = doc.get("url", doc.get("document_url", ""))
 
-            context_text += f"\n\n--- Source {i + 1}: {title} ---\n"
-            if url:
-                context_text += f"URL: {url}\n"
-            context_text += f"{content[:1500]}..."  # Limit each document to 1500 chars
+                context_text += f"\n\n--- Source {i + 1}: {title} ---\n"
+                if url:
+                    context_text += f"URL: {url}\n"
+                context_text += f"{content[:1500]}..."
 
         # Create comprehensive analysis prompt
+        subquery_note = ""
+        if subqueries:
+            subquery_note = f"""
+            
+            The main research question has been broken down into {len(subqueries)} focused sub-questions:
+            {chr(10).join(f"  {i+1}. {sq}" for i, sq in enumerate(subqueries))}
+            
+            The source materials below are organized by these sub-questions to help you address each aspect comprehensively.
+            """
+        
         prompt = f"""
             You are an expert research analyst tasked with creating a comprehensive, in-depth analysis report.
 
             Research Question: {query}
+            {subquery_note}
 
             Based on the following source materials, create a detailed analytical report of approximately 2000 words with proper academic structure and headings.
 
@@ -1511,10 +1550,12 @@ async def comprehensive_analysis_tool(tool_input: dict, context: dict) -> dict:
 
             4. **Detailed Analysis** (1500 words)
             - Break this into 3-4 subsections with clear headings
-            - Present findings with supporting evidence
+            - If sub-questions were provided, ensure each is thoroughly addressed
+            - Present findings with supporting evidence from the organized sources
             - Include comparative analysis where relevant
             - Discuss trends, patterns, and relationships
             - Address contradictions or conflicting information
+            - Synthesize information across all sub-questions to answer the main research question
 
             5. **Implications and Significance** (500 words)
             - Broader implications of findings
