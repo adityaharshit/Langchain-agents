@@ -559,42 +559,42 @@ async def intelligent_url_generator_tool(tool_input: dict, context: dict) -> dic
         
         # Create a comprehensive prompt for URL generation
         prompt = f"""
-You are an expert research assistant tasked with generating relevant URLs for web scraping to answer research questions.
+            You are an expert research assistant tasked with generating relevant URLs for web scraping to answer research questions.
 
-Main Research Query: {query}
+            Main Research Query: {query}
 
-Sub-queries to address:
-{chr(10).join(f"- {sq}" for sq in subqueries)}
+            Sub-queries to address:
+            {chr(10).join(f"- {sq}" for sq in subqueries)}
 
-Your task is to generate {max_urls} high-quality, relevant URLs that would likely contain information to answer these research questions.
+            Your task is to generate {max_urls} high-quality, relevant URLs that would likely contain information to answer these research questions.
 
-Guidelines:
-1. Focus on authoritative sources (academic institutions, government agencies, reputable news organizations, research institutes)
-2. Include a mix of source types: academic papers, reports, news articles, official statistics
-3. Prioritize recent content (2019-2024) when relevant
-4. Consider international and regional perspectives
-5. Include specific organizations likely to have relevant data
+            Guidelines:
+            1. Focus on authoritative sources (academic institutions, government agencies, reputable news organizations, research institutes)
+            2. Include a mix of source types: academic papers, reports, news articles, official statistics
+            3. Prioritize recent content (2019-2024) when relevant
+            4. Consider international and regional perspectives
+            5. Include specific organizations likely to have relevant data
 
-Preferred domains (if applicable): {', '.join(preferred_domains) if preferred_domains else 'Any authoritative source'}
+            Preferred domains (if applicable): {', '.join(preferred_domains) if preferred_domains else 'Any authoritative source'}
 
-For each URL, provide:
-- The complete URL
-- A brief description of why this source would be valuable
-- The expected content type (academic paper, report, news article, etc.)
+            For each URL, provide:
+            - The complete URL
+            - A brief description of why this source would be valuable
+            - The expected content type (academic paper, report, news article, etc.)
 
-Format your response as a JSON array with this structure:
-[
-  {{
-    "url": "https://example.com/relevant-article",
-    "description": "Why this URL is relevant to the research",
-    "content_type": "academic paper|report|news article|government data|research institute",
-    "relevance_score": 0.95,
-    "expected_topics": ["topic1", "topic2"]
-  }}
-]
+            Format your response as a JSON array with this structure:
+            [
+            {{
+                "url": "https://example.com/relevant-article",
+                "description": "Why this URL is relevant to the research",
+                "content_type": "academic paper|report|news article|government data|research institute",
+                "relevance_score": 0.95,
+                "expected_topics": ["topic1", "topic2"]
+            }}
+            ]
 
-Generate exactly {max_urls} URLs, ranked by relevance and authority.
-"""
+            Generate exactly {max_urls} URLs, ranked by relevance and authority.
+            """
 
         try:
             # Call OpenAI API
@@ -1076,12 +1076,12 @@ async def web_scraper_tool(tool_input: dict, context: dict) -> dict:
 
 @mcp_tool(
     name="semantic_search",
-    description="Uses PGVector semantic search to find relevant content from stored documents",
+    description="Uses semantic search to find relevant content from stored documents",
     allowed_agents=["WebScraperRetrievalAgent", "DeepAnalysisAgent"]
 )
 async def semantic_search_tool(tool_input: dict, context: dict) -> dict:
     """
-    Uses PGVector semantic search to find relevant content.
+    Uses semantic search to find relevant content.
     
     Args:
         tool_input: {"query": str, "k": int, "collection_name": str, "similarity_threshold": float}

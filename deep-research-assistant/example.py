@@ -11,104 +11,131 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 import re
-
+from app.workers.embedding import generate_embedding, generate_embeddings, calculate_cosine_similarity
 from app.mcp import mcp_tool
+import logging
+from typing import List, Dict, Any, Optional, Tuple
+from dataclasses import dataclass
+
+from sqlalchemy import text, select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.database import db_manager
+from app.db.models import Document, Chunk
+from app.workers.embedding import generate_embedding, generate_embeddings, calculate_cosine_similarity
+from app.config import config
 
 logger = logging.getLogger(__name__)
 load_dotenv()
 
+@dataclass
+class SearchResult:
+    """Search result with similarity score and metadata."""
+    chunk_id: int
+    document_id: int
+    chunk_text: str
+    similarity_score: float
+    document_title: str
+    document_url: str
+    chunk_meta: Dict[str, Any]
+    token_count: int
 
-async def semantic_search_tool(tool_input: dict, context: dict) -> dict:
-    """
-    Uses PGVector semantic search to find relevant content.
-    
-    Args:
-        tool_input: {"query": str, "k": int, "collection_name": str, "similarity_threshold": float}
-        context: Additional context information
-    """
-    try:
-        from langchain_postgres import PGVector
-        from langchain_openai import OpenAIEmbeddings
-        from app.config import config
-        import asyncio
+async def semantic_search(
+        self, 
+        query: str, 
+        k: int = None,
+        similarity_threshold: float = None,
+        document_ids: Optional[List[int]] = None
+    ) -> List[SearchResult]:
+        """
+        Perform semantic search using vector similarity.
         
-        query = tool_input.get("query", "")
-        k = tool_input.get("k", 8)
-        collection_name = tool_input.get("collection_name", "research_documents")
-        similarity_threshold = tool_input.get("similarity_threshold", config.SIMILARITY_THRESHOLD)
-        
-        if not query:
-            return {"status": "error", "error": "Query is required", "meta": {}}
-        
-        # Initialize OpenAI embeddings
-        embeddings = OpenAIEmbeddings(
-            model=config.EMBEDDING_MODEL,
-            openai_api_key=config.OPENAI_API_KEY
-        )
-        
-        # Initialize PGVector
-        connection_string = config.DATABASE_URL.replace("+asyncpg", "")
-        vectorstore = PGVector(
-            connection=connection_string,
-            embeddings=embeddings,
-            collection_name=collection_name
-        )
-        
-        # Perform semantic search
-        results = await asyncio.to_thread(
-            vectorstore.similarity_search_with_score,
-            query,
-            k=k
-        )
-        
-        # Filter by similarity threshold and format results
-        relevant_results = []
-        for doc, score in results:
-            # Convert distance to similarity (PGVector returns distance, lower is better)
-            similarity = 1 - score if score <= 1 else 1 / (1 + score)
+        Args:
+            query: Search query text
+            k: Number of results to return
+            similarity_threshold: Minimum similarity score
+            document_ids: Optional list of document IDs to search within
             
-            if similarity >= similarity_threshold and similarity <= 0.6:
-                relevant_results.append({
-                    "content": doc.page_content,
-                    "metadata": doc.metadata,
-                    "similarity_score": similarity,
-                    "url": doc.metadata.get("url", ""),
-                    "title": doc.metadata.get("title", ""),
-                    "source_trust_score": doc.metadata.get("source_trust_score", 0.5)
-                })
+        Returns:
+            List of search results ordered by similarity
+        """
+        k = k or self.default_k
+        similarity_threshold = self.similarity_threshold
         
-        # Calculate confidence based on results
-        if relevant_results:
-            avg_similarity = sum(r["similarity_score"] for r in relevant_results) / len(relevant_results)
-            confidence = min(avg_similarity * 1.2, 1.0)  # Boost confidence slightly
-        else:
-            confidence = 0.0
-        
-        return {
-            "status": "ok",
-            "result": {
-                "results": relevant_results,
-                "total_results": len(relevant_results),
-                "confidence_score": confidence,
-                "query": query,
-                "collection_name": collection_name
-            },
-            "meta": {
-                "search_method": "pgvector_semantic",
-                "embedding_model": config.EMBEDDING_MODEL,
+        try:
+            # Generate query embedding
+            query_embedding = await generate_embedding(query)
+            
+            if not query_embedding or all(x == 0 for x in query_embedding):
+                logger.warning("Query embedding is empty or zero vector")
+                return []
+            
+            # Ensure query_embedding is a flat list
+            if isinstance(query_embedding, list) and len(query_embedding) == 1 and isinstance(query_embedding[0], list):
+                query_embedding = query_embedding[0]
+
+            print(query_embedding)
+            embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
+
+            
+            # Build search query
+            search_query = text("""
+                SELECT 
+                    c.id as chunk_id,
+                    c.document_id,
+                    c.chunk_text,
+                    c.token_count,
+                    c.chunk_meta,
+                    d.title as document_title,
+                    d.url as document_url,
+                    (c.embedding <=> :query_embedding) as distance,
+                    (1 - (c.embedding <=> :query_embedding)) as similarity
+                FROM chunks c
+                JOIN documents d ON c.document_id = d.id
+                WHERE c.embedding IS NOT NULL
+                    AND d.language = 'en'
+                    AND (1 - (c.embedding <=> :query_embedding)) >= :similarity_threshold
+                    {document_filter}
+                ORDER BY c.embedding <=> :query_embedding
+                LIMIT :k
+            """.format(
+                document_filter="AND c.document_id = ANY(:document_ids)" if document_ids else ""
+            ))
+            
+            params = {
+                "query_embedding": embedding_str,
                 "similarity_threshold": similarity_threshold,
-                "requested_k": k,
-                "returned_k": len(relevant_results)
+                "k": k
             }
-        }
-        
-    except Exception as e:
-        logger.error(f"Semantic search failed: {e}")
-        return {
-            "status": "error",
-            "error": f"Semantic search failed: {str(e)}",
-            "meta": {}
-        }
+            
+            if document_ids:
+                params["document_ids"] = document_ids
+            
+            async with db_manager.get_session() as session:
+                result = await session.execute(search_query, params)
+                rows = result.fetchall()
+            print("SEMANTIC SEARCH RESULTS:" + rows)
+            # Convert to SearchResult objects
+            search_results = []
+            for row in rows:
+                search_results.append(SearchResult(
+                    chunk_id=row.chunk_id,
+                    document_id=row.document_id,
+                    chunk_text=row.chunk_text,
+                    similarity_score=float(row.similarity),
+                    document_title=row.document_title,
+                    document_url=row.document_url,
+                    chunk_meta=row.chunk_meta or {},
+                    token_count=row.token_count
+                ))
+            
+            logger.info(f"Semantic search returned {len(search_results)} results for query: {query[:50]}...")
+            return search_results
+            
+        except Exception as e:
+            logger.error(f"Semantic search failed: {e}")
+            return []
+    
 
 if __name__ == "__main__":
     import asyncio

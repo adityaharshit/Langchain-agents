@@ -10,6 +10,7 @@ import re
 from app.mcp import mcp_registry
 from app.workers.vector_store import retrieve_with_confidence
 from app.config import config
+from app.mcp_tools import semantic_search_tool
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +70,9 @@ class ResearchCoordinatorAgent:
             
             # Step 2: Initial RAG retrieval
             if not state.get("retrieval_results"):
-                retrieval_result = await retrieve_with_confidence(
-                    state["query"], 
-                    k=config.RETRIEVAL_K,
-                    method="semantic"
+                retrieval_result = await semantic_search_tool(
+                    tool_input = state["query"],
+                    context = {}
                 )
                 
                 state["retrieval_results"] = {
@@ -179,11 +179,11 @@ class WebScraperRetrievalAgent:
                     
                     if upsert_result["status"] == "ok":
                         # Re-run retrieval with new content
-                        retrieval_result = await retrieve_with_confidence(
-                            state["query"],
-                            k=config.RETRIEVAL_K,
-                            method="hybrid"
+                        retrieval_result = await semantic_search_tool(
+                            tool_input = state["query"],
+                            context = {}
                         )
+                
                         
                         # Update retrieval results
                         state["retrieval_results"] = {
@@ -392,7 +392,7 @@ class FactCheckingAgent:
     async def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Execute the Fact-Checking Agent."""
         try:
-            logger.info(f"FactCheckingAgent processing analysis results...")
+            logger.info("FactCheckingAgent processing analysis results...")
             
             analysis_results = state.get("analysis_results", {})
             retrieval_results = state.get("retrieval_results", {}).get("results", [])
@@ -549,7 +549,7 @@ class OutputFormattingAgent:
     async def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Execute the Output Formatting Agent."""
         try:
-            logger.info(f"OutputFormattingAgent creating final output...")
+            logger.info("OutputFormattingAgent creating final output...")
             
             # Collect all results
             analysis_results = state.get("analysis_results", {})
