@@ -1438,12 +1438,12 @@ async def rag_upsert_tool(tool_input: dict, context: dict) -> dict:
 
 @mcp_tool(
     name="comprehensive_analysis",
-    description="Uses GPT-4o to generate comprehensive 2000-word analysis with proper headings and structure",
+    description="Uses GPT-4o to generate comprehensive 5000-word analysis with proper headings and structure",
     allowed_agents=["DeepAnalysisAgent"],
 )
 async def comprehensive_analysis_tool(tool_input: dict, context: dict) -> dict:
     """
-    Uses GPT-4o to generate comprehensive analysis (2000 words) with proper structure.
+    Uses GPT-4o to generate comprehensive analysis (5000 words) with proper structure.
 
     Args:
         tool_input: {"query": str, "context_documents": List[dict], "analysis_type": str}
@@ -1484,58 +1484,58 @@ async def comprehensive_analysis_tool(tool_input: dict, context: dict) -> dict:
 
         # Create comprehensive analysis prompt
         prompt = f"""
-You are an expert research analyst tasked with creating a comprehensive, in-depth analysis report.
+            You are an expert research analyst tasked with creating a comprehensive, in-depth analysis report.
 
-Research Question: {query}
+            Research Question: {query}
 
-Based on the following source materials, create a detailed analytical report of approximately 2000 words with proper academic structure and headings.
+            Based on the following source materials, create a detailed analytical report of approximately 2000 words with proper academic structure and headings.
 
-Source Materials:
-{context_text}
+            Source Materials:
+            {context_text}
 
-Your analysis should include:
+            Your analysis should include:
 
-1. **Executive Summary** (200 words)
-   - Key findings and main conclusions
-   - Brief overview of methodology and sources
+            1. **Executive Summary** (300 words)
+            - Key findings and main conclusions
+            - Brief overview of methodology and sources
 
-2. **Introduction and Background** (300 words)
-   - Context and significance of the research question
-   - Scope and limitations of the analysis
-   - Overview of sources and their credibility
+            2. **Introduction and Background** (400 words)
+            - Context and significance of the research question
+            - Scope and limitations of the analysis
+            - Overview of sources and their credibility
 
-3. **Methodology and Approach** (200 words)
-   - Analytical framework used
-   - Source evaluation criteria
-   - Limitations and assumptions
+            3. **Methodology and Approach** (500 words)
+            - Analytical framework used
+            - Source evaluation criteria
+            - Limitations and assumptions
 
-4. **Detailed Analysis** (800 words)
-   - Break this into 3-4 subsections with clear headings
-   - Present findings with supporting evidence
-   - Include comparative analysis where relevant
-   - Discuss trends, patterns, and relationships
-   - Address contradictions or conflicting information
+            4. **Detailed Analysis** (1500 words)
+            - Break this into 3-4 subsections with clear headings
+            - Present findings with supporting evidence
+            - Include comparative analysis where relevant
+            - Discuss trends, patterns, and relationships
+            - Address contradictions or conflicting information
 
-5. **Implications and Significance** (300 words)
-   - Broader implications of findings
-   - Policy or practical recommendations
-   - Areas for further research
+            5. **Implications and Significance** (500 words)
+            - Broader implications of findings
+            - Policy or practical recommendations
+            - Areas for further research
 
-6. **Conclusion** (200 words)
-   - Summary of key insights
-   - Final assessment and recommendations
+            6. **Conclusion** (300 words)
+            - Summary of key insights
+            - Final assessment and recommendations
 
-Requirements:
-- Use proper academic tone and structure
-- Include specific references to source materials
-- Provide evidence-based conclusions
-- Address multiple perspectives where available
-- Maintain objectivity while drawing clear insights
-- Use clear headings and subheadings
-- Ensure logical flow between sections
+            Requirements:
+            - Use proper academic tone and structure
+            - Include specific references to source materials
+            - Provide evidence-based conclusions
+            - Address multiple perspectives where available
+            - Maintain objectivity while drawing clear insights
+            - Use clear headings and subheadings
+            - Ensure logical flow between sections
 
-Generate a comprehensive, well-structured analysis that demonstrates deep understanding of the topic.
-"""
+            Generate a comprehensive, well-structured analysis that demonstrates deep understanding of the topic.
+            """
 
         try:
             # Call OpenAI API for comprehensive analysis
@@ -1549,11 +1549,11 @@ Generate a comprehensive, well-structured analysis that demonstrates deep unders
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.3,
-                max_tokens=4000,  # Allow for comprehensive response
+                max_tokens=6000,  # Allow for comprehensive response
             )
 
             analysis_content = response.choices[0].message.content
-
+            print(analysis_content)
             # Extract key insights and structure
             sections = _extract_analysis_sections(analysis_content)
 

@@ -31,7 +31,7 @@ class Config:
     CHUNK_OVERLAP_RATIO: float = 0.2
     
     # Retrieval Configuration
-    RETRIEVAL_K: int = 8
+    RETRIEVAL_K: int = 15
     CONFIDENCE_THRESHOLD: float = 0.4
     SIMILARITY_THRESHOLD: float = 0.3  # Minimum similarity score for semantic search (0.0-1.0)
     
@@ -42,7 +42,7 @@ class Config:
     
     # Intelligent URL Generation
     URL_GENERATION_MODEL: str = "gpt-4o"
-    MAX_GENERATED_URLS: int = 10
+    MAX_GENERATED_URLS: int = 15
     URL_GENERATION_TEMPERATURE: float = 0.3
     
     # Embedding Configuration

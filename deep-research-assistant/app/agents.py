@@ -673,46 +673,55 @@ class OutputFormattingAgent:
         
         markdown_parts = []
         
-        # Title
-        markdown_parts.append(f"# Research Analysis: {query}\n")
+        # Check if we have comprehensive analysis from DeepAnalysisAgent
+        comprehensive_analysis = analysis_results.get("comprehensive", {}).get("comprehensive_analysis", "")
         
-        # Executive Summary
-        if executive_summary:
-            markdown_parts.append("## Executive Summary\n")
-            markdown_parts.append(executive_summary)
+        if comprehensive_analysis:
+            # Use the comprehensive analysis as the main content
+            markdown_parts.append(comprehensive_analysis)
+            markdown_parts.append("\n\n")
+        else:
+            # Fallback to basic structure if no comprehensive analysis
+            # Title
+            markdown_parts.append(f"# Research Analysis: {query}\n\n")
+            
+            # Executive Summary
+            if executive_summary:
+                markdown_parts.append("## Executive Summary\n\n")
+                markdown_parts.append(executive_summary)
+                markdown_parts.append("\n\n")
+            
+            # Key Findings
+            markdown_parts.append("## Key Findings\n\n")
+            
+            # Add findings from different analysis types
+            if "comparative" in analysis_results:
+                comparative = analysis_results["comparative"]
+                if "insights" in comparative:
+                    for insight in comparative["insights"][:3]:
+                        markdown_parts.append(f"- {insight.get('description', 'N/A')} [1]\n")
+            
+            if "trend" in analysis_results:
+                trend = analysis_results["trend"]
+                if "trends" in trend:
+                    for metric, trend_data in list(trend["trends"].items())[:2]:
+                        direction = trend_data.get("trend_direction", "stable")
+                        markdown_parts.append(f"- {metric.title()} shows {direction} trend [2]\n")
+            
             markdown_parts.append("\n")
+            
+            # Supporting Evidence
+            markdown_parts.append("## Supporting Evidence\n\n")
+            
+            for i, result in enumerate(retrieval_results[:3], 1):
+                title = result["document_title"]
+                snippet = result["chunk_text"][:200] + "..." if len(result["chunk_text"]) > 200 else result["chunk_text"]
+                markdown_parts.append(f"**Source {i}: {title}**\n\n")
+                markdown_parts.append(f"{snippet} [{i}]\n\n")
         
-        # Key Findings
-        markdown_parts.append("## Key Findings\n")
-        
-        # Add findings from different analysis types
-        if "comparative" in analysis_results:
-            comparative = analysis_results["comparative"]
-            if "insights" in comparative:
-                for insight in comparative["insights"][:3]:
-                    markdown_parts.append(f"- {insight.get('description', 'N/A')} [1]\n")
-        
-        if "trend" in analysis_results:
-            trend = analysis_results["trend"]
-            if "trends" in trend:
-                for metric, trend_data in list(trend["trends"].items())[:2]:
-                    direction = trend_data.get("trend_direction", "stable")
-                    markdown_parts.append(f"- {metric.title()} shows {direction} trend [2]\n")
-        
-        markdown_parts.append("\n")
-        
-        # Supporting Evidence
-        markdown_parts.append("## Supporting Evidence\n")
-        
-        for i, result in enumerate(retrieval_results[:3], 1):
-            title = result["document_title"]
-            snippet = result["chunk_text"][:200] + "..." if len(result["chunk_text"]) > 200 else result["chunk_text"]
-            markdown_parts.append(f"**Source {i}: {title}**\n")
-            markdown_parts.append(f"{snippet} [{i}]\n\n")
-        
-        # References
+        # Always add References section at the end
         if citations:
-            markdown_parts.append("## References\n")
+            markdown_parts.append("## References\n\n")
             for i, citation in enumerate(citations, 1):
                 markdown_parts.append(f"[{i}] {citation}\n")
         
